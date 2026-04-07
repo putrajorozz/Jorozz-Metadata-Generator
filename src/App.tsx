@@ -21,7 +21,8 @@ import {
   Info,
   Menu,
   Settings,
-  Edit3
+  Edit3,
+  History
 } from 'lucide-react';
 import { GoogleGenAI, Type } from "@google/genai";
 import { cn } from './lib/utils';
@@ -65,6 +66,7 @@ export default function App() {
   const [minTitleWords, setMinTitleWords] = useState(10);
   const [keywordCount, setKeywordCount] = useState(50);
   const [exportExtension, setExportExtension] = useState<'.eps' | '.jpg' | '.png'>('.eps');
+  const [exportScope, setExportScope] = useState<'all' | 'selected'>('all');
   const [activeDownloadMenu, setActiveDownloadMenu] = useState<{
     type: 'adobe' | 'shutterstock';
     targetImages?: ImageData[];
@@ -81,6 +83,7 @@ export default function App() {
     return saved ? JSON.parse(saved) : [];
   });
   const [showKeyModal, setShowKeyModal] = useState(false);
+  const [showInfoPage, setShowInfoPage] = useState(false);
   const [newKey, setNewKey] = useState('');
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [isEditing, setIsEditing] = useState(false);
@@ -678,6 +681,13 @@ export default function App() {
                 )}
               </button>
               <button 
+                onClick={() => setShowInfoPage(true)}
+                className="p-2 hover:bg-slate-100 rounded-xl text-slate-500 transition-colors"
+                title="Informasi Website"
+              >
+                <Info className="w-4 h-4" />
+              </button>
+              <button 
                 onClick={open}
                 className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-lg shadow-indigo-100 active:scale-95"
               >
@@ -900,94 +910,111 @@ export default function App() {
 
                       {/* Download All CSV Options below Generate All */}
                       {images.some(img => img.status === 'completed') && (
-                        <div className="flex flex-wrap items-center justify-center gap-2" ref={dropdownRef}>
-                          <AnimatePresence>
-                            {activeDownloadMenu && !activeDownloadMenu.targetImages && (
-                              <div className="relative">
-                                <motion.div
-                                  initial={{ opacity: 0, y: -10, scale: 0.95 }}
-                                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                                  exit={{ opacity: 0, y: -10, scale: 0.95 }}
-                                  className="absolute top-full left-1/2 -translate-x-1/2 mt-2 w-48 bg-white rounded-2xl border border-slate-200 shadow-xl z-50 overflow-hidden p-2"
-                                >
-                                  <div className="flex items-center justify-between px-2 py-1 mb-2 border-b border-slate-100">
-                                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Pilih Ekstensi</span>
-                                    <button onClick={() => setActiveDownloadMenu(null)} className="p-1 text-slate-400 hover:text-slate-600">
-                                      <X className="w-3.5 h-3.5" />
-                                    </button>
-                                  </div>
-                                  <div className="space-y-1">
-                                    {(['.eps', '.jpg', '.png'] as const).map((ext) => (
-                                      <button
-                                        key={ext}
-                                        onClick={() => setExportExtension(ext)}
-                                        className={cn(
-                                          "w-full px-3 py-2 rounded-xl text-xs font-bold transition-all text-left flex items-center justify-between",
-                                          exportExtension === ext
-                                            ? "bg-indigo-50 text-indigo-600"
-                                            : "text-slate-600 hover:bg-slate-50"
-                                        )}
-                                      >
-                                        {ext}
-                                        {exportExtension === ext && <Check className="w-3.5 h-3.5" />}
-                                      </button>
-                                    ))}
-                                  </div>
-                                  <button
-                                    onClick={() => {
-                                      if (activeDownloadMenu.type === 'adobe') downloadAdobeStockCSV();
-                                      else downloadShutterstockCSV();
-                                      setActiveDownloadMenu(null);
-                                    }}
-                                    className="w-full mt-2 px-4 py-2.5 bg-indigo-600 text-white rounded-xl text-xs font-bold hover:bg-indigo-700 transition-all flex items-center justify-center gap-2"
-                                  >
-                                    <Download className="w-4 h-4" />
-                                    Download CSV
-                                  </button>
-                                </motion.div>
-                                <div className="flex flex-wrap items-center justify-center gap-2 opacity-50 pointer-events-none">
-                                  <button className="px-4 py-2 bg-white border border-slate-200 text-indigo-600 rounded-xl text-xs font-bold flex items-center gap-2">
-                                    <Download className="w-4 h-4" /> Freepik
-                                  </button>
-                                  <button className="px-4 py-2 bg-white border border-slate-200 text-indigo-600 rounded-xl text-xs font-bold flex items-center gap-2">
-                                    <Download className="w-4 h-4" /> Adobe Stock
-                                  </button>
-                                  <button className="px-4 py-2 bg-white border border-slate-200 text-indigo-600 rounded-xl text-xs font-bold flex items-center gap-2">
-                                    <Download className="w-4 h-4" /> Shutterstock
+                        <div className="flex flex-col items-center justify-center gap-2 mt-4" ref={dropdownRef}>
+                          <AnimatePresence mode="wait">
+                            {activeDownloadMenu && !activeDownloadMenu.targetImages ? (
+                              <motion.div
+                                key="download-menu"
+                                initial={{ opacity: 0, y: -10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: -10 }}
+                                className="w-full max-w-md p-4 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col gap-4"
+                              >
+                                <div className="flex items-center justify-between">
+                                  <span className="text-sm font-bold text-slate-700">
+                                    Format File ({activeDownloadMenu.type === 'adobe' ? 'Adobe Stock' : 'Shutterstock'})
+                                  </span>
+                                  <button onClick={() => setActiveDownloadMenu(null)} className="p-1.5 text-slate-400 hover:bg-slate-100 rounded-lg transition-colors">
+                                    <X className="w-4 h-4" />
                                   </button>
                                 </div>
-                              </div>
+                                <div className="flex gap-2">
+                                  {(['.eps', '.jpg', '.png'] as const).map((ext) => (
+                                    <button
+                                      key={ext}
+                                      onClick={() => setExportExtension(ext)}
+                                      className={cn(
+                                        "flex-1 py-2.5 rounded-xl text-sm font-bold transition-all border",
+                                        exportExtension === ext
+                                          ? "bg-indigo-50 border-indigo-200 text-indigo-700 shadow-inner"
+                                          : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+                                      )}
+                                    >
+                                      {ext}
+                                    </button>
+                                  ))}
+                                </div>
+                                <button
+                                  onClick={() => {
+                                    if (activeDownloadMenu.type === 'adobe') downloadAdobeStockCSV(activeDownloadMenu.targetImages);
+                                    else downloadShutterstockCSV(activeDownloadMenu.targetImages);
+                                    setActiveDownloadMenu(null);
+                                  }}
+                                  className="w-full py-3 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 transition-all flex items-center justify-center gap-2 shadow-sm"
+                                >
+                                  <Download className="w-4 h-4" />
+                                  Lanjutkan Download
+                                </button>
+                              </motion.div>
+                            ) : (
+                              <motion.div 
+                                key="download-buttons"
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                exit={{ opacity: 0 }}
+                                className="flex flex-col items-center gap-3"
+                              >
+                                {selectedId && images.find(img => img.id === selectedId)?.status === 'completed' && (
+                                  <div className="flex bg-slate-100 p-1 rounded-xl">
+                                    <button
+                                      onClick={() => setExportScope('all')}
+                                      className={cn(
+                                        "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
+                                        exportScope === 'all' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                                      )}
+                                    >
+                                      Semua Gambar
+                                    </button>
+                                    <button
+                                      onClick={() => setExportScope('selected')}
+                                      className={cn(
+                                        "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
+                                        exportScope === 'selected' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                                      )}
+                                    >
+                                      Gambar Terpilih Saja
+                                    </button>
+                                  </div>
+                                )}
+                                <div className="flex flex-wrap items-center justify-center gap-2">
+                                  <button
+                                    onClick={() => downloadCSV(exportScope === 'selected' && selectedId ? [images.find(img => img.id === selectedId)!] : undefined)}
+                                    className="px-4 py-2 bg-white hover:bg-slate-50 border border-slate-200 text-indigo-600 rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-sm active:scale-95"
+                                    title="Download Freepik CSV"
+                                  >
+                                    <Download className="w-4 h-4" />
+                                    Freepik
+                                  </button>
+                                  <button
+                                    onClick={() => setActiveDownloadMenu({ type: 'adobe', targetImages: exportScope === 'selected' && selectedId ? [images.find(img => img.id === selectedId)!] : undefined })}
+                                    className="px-4 py-2 bg-white hover:bg-slate-50 border border-slate-200 text-indigo-600 rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-sm active:scale-95"
+                                    title="Download Adobe Stock CSV"
+                                  >
+                                    <Download className="w-4 h-4" />
+                                    Adobe Stock
+                                  </button>
+                                  <button
+                                    onClick={() => setActiveDownloadMenu({ type: 'shutterstock', targetImages: exportScope === 'selected' && selectedId ? [images.find(img => img.id === selectedId)!] : undefined })}
+                                    className="px-4 py-2 bg-white hover:bg-slate-50 border border-slate-200 text-indigo-600 rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-sm active:scale-95"
+                                    title="Download Shutterstock CSV"
+                                  >
+                                    <Download className="w-4 h-4" />
+                                    Shutterstock
+                                  </button>
+                                </div>
+                              </motion.div>
                             )}
                           </AnimatePresence>
-                          
-                          {(!activeDownloadMenu || activeDownloadMenu.targetImages) && (
-                            <div className="flex flex-wrap items-center justify-center gap-2">
-                              <button
-                                onClick={() => downloadCSV()}
-                                className="px-4 py-2 bg-white hover:bg-slate-50 border border-slate-200 text-indigo-600 rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-sm active:scale-95"
-                                title="Download Freepik CSV"
-                              >
-                                <Download className="w-4 h-4" />
-                                Freepik
-                              </button>
-                              <button
-                                onClick={() => setActiveDownloadMenu({ type: 'adobe' })}
-                                className="px-4 py-2 bg-white hover:bg-slate-50 border border-slate-200 text-indigo-600 rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-sm active:scale-95"
-                                title="Download Adobe Stock CSV"
-                              >
-                                <Download className="w-4 h-4" />
-                                Adobe Stock
-                              </button>
-                              <button
-                                onClick={() => setActiveDownloadMenu({ type: 'shutterstock' })}
-                                className="px-4 py-2 bg-white hover:bg-slate-50 border border-slate-200 text-indigo-600 rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-sm active:scale-95"
-                                title="Download Shutterstock CSV"
-                              >
-                                <Download className="w-4 h-4" />
-                                Shutterstock
-                              </button>
-                            </div>
-                          )}
                         </div>
                       )}
                     </div>
@@ -1070,94 +1097,87 @@ export default function App() {
                               {selectedImage.status === 'completed' ? "Regenerate" : "Generate"}
                             </button>
                             {selectedImage.status === 'completed' && (
-                              <div className="flex items-center gap-1 relative" ref={singleDropdownRef}>
-                                <AnimatePresence>
-                                  {activeDownloadMenu && activeDownloadMenu.targetImages?.[0]?.id === selectedImage.id && (
-                                    <div className="relative">
-                                      <motion.div
-                                        initial={{ opacity: 0, y: -10, scale: 0.95 }}
-                                        animate={{ opacity: 1, y: 0, scale: 1 }}
-                                        exit={{ opacity: 0, y: -10, scale: 0.95 }}
-                                        className="absolute top-full right-0 mt-2 w-48 bg-white rounded-2xl border border-slate-200 shadow-xl z-50 overflow-hidden p-2"
-                                      >
-                                        <div className="flex items-center justify-between px-2 py-1 mb-2 border-b border-slate-100">
-                                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Pilih Ekstensi</span>
-                                          <button onClick={() => setActiveDownloadMenu(null)} className="p-1 text-slate-400 hover:text-slate-600">
-                                            <X className="w-3.5 h-3.5" />
-                                          </button>
-                                        </div>
-                                        <div className="space-y-1">
-                                          {(['.eps', '.jpg', '.png'] as const).map((ext) => (
-                                            <button
-                                              key={ext}
-                                              onClick={() => setExportExtension(ext)}
-                                              className={cn(
-                                                "w-full px-3 py-2 rounded-xl text-xs font-bold transition-all text-left flex items-center justify-between",
-                                                exportExtension === ext
-                                                  ? "bg-indigo-50 text-indigo-600"
-                                                  : "text-slate-600 hover:bg-slate-50"
-                                              )}
-                                            >
-                                              {ext}
-                                              {exportExtension === ext && <Check className="w-3.5 h-3.5" />}
-                                            </button>
-                                          ))}
-                                        </div>
-                                        <button
-                                          onClick={() => {
-                                            if (activeDownloadMenu.type === 'adobe') downloadAdobeStockCSV(activeDownloadMenu.targetImages);
-                                            else downloadShutterstockCSV(activeDownloadMenu.targetImages);
-                                            setActiveDownloadMenu(null);
-                                          }}
-                                          className="w-full mt-2 px-4 py-2.5 bg-indigo-600 text-white rounded-xl text-xs font-bold hover:bg-indigo-700 transition-all flex items-center justify-center gap-2"
-                                        >
-                                          <Download className="w-4 h-4" />
-                                          Download CSV
-                                        </button>
-                                      </motion.div>
-                                      <div className="flex items-center gap-2 opacity-50 pointer-events-none">
-                                        <button className="p-2.5 bg-white border border-slate-200 text-indigo-600 rounded-xl text-xs font-bold shadow-sm">
-                                          Freepik
-                                        </button>
-                                        <button className="p-2.5 bg-white border border-slate-200 text-indigo-600 rounded-xl text-xs font-bold shadow-sm">
-                                          Adobe Stock
-                                        </button>
-                                        <button className="p-2.5 bg-white border border-slate-200 text-indigo-600 rounded-xl text-xs font-bold shadow-sm">
-                                          Shutterstock
+                              <div className="flex flex-col gap-2 mt-4" ref={singleDropdownRef}>
+                                <AnimatePresence mode="wait">
+                                  {activeDownloadMenu && activeDownloadMenu.targetImages?.[0]?.id === selectedImage.id ? (
+                                    <motion.div
+                                      key="single-download-menu"
+                                      initial={{ opacity: 0, y: -10 }}
+                                      animate={{ opacity: 1, y: 0 }}
+                                      exit={{ opacity: 0, y: -10 }}
+                                      className="w-full p-4 bg-white rounded-2xl border border-slate-200 flex flex-col gap-4 shadow-sm"
+                                    >
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-sm font-bold text-slate-700">
+                                          Format File ({activeDownloadMenu.type === 'adobe' ? 'Adobe Stock' : 'Shutterstock'})
+                                        </span>
+                                        <button onClick={() => setActiveDownloadMenu(null)} className="p-1.5 text-slate-400 hover:bg-slate-100 rounded-lg transition-colors">
+                                          <X className="w-4 h-4" />
                                         </button>
                                       </div>
-                                    </div>
+                                      <div className="flex gap-2">
+                                        {(['.eps', '.jpg', '.png'] as const).map((ext) => (
+                                          <button
+                                            key={ext}
+                                            onClick={() => setExportExtension(ext)}
+                                            className={cn(
+                                              "flex-1 py-2.5 rounded-xl text-sm font-bold transition-all border",
+                                              exportExtension === ext
+                                                ? "bg-indigo-50 border-indigo-200 text-indigo-700 shadow-inner"
+                                                : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+                                            )}
+                                          >
+                                            {ext}
+                                          </button>
+                                        ))}
+                                      </div>
+                                      <button
+                                        onClick={() => {
+                                          if (activeDownloadMenu.type === 'adobe') downloadAdobeStockCSV([selectedImage]);
+                                          else downloadShutterstockCSV([selectedImage]);
+                                          setActiveDownloadMenu(null);
+                                        }}
+                                        className="w-full py-3 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 transition-all flex items-center justify-center gap-2 shadow-sm"
+                                      >
+                                        <Download className="w-4 h-4" />
+                                        Lanjutkan Download
+                                      </button>
+                                    </motion.div>
+                                  ) : (
+                                    <motion.div 
+                                      key="single-download-buttons"
+                                      initial={{ opacity: 0 }}
+                                      animate={{ opacity: 1 }}
+                                      exit={{ opacity: 0 }}
+                                      className="flex flex-wrap items-center justify-end gap-2"
+                                    >
+                                      <button
+                                        onClick={() => downloadCSV([selectedImage])}
+                                        className="p-2.5 bg-white hover:bg-slate-50 border border-slate-200 text-indigo-600 rounded-xl transition-all flex items-center gap-2 text-xs font-bold shadow-sm active:scale-95"
+                                        title="Download Freepik CSV"
+                                      >
+                                        <Download className="w-4 h-4" />
+                                        Freepik
+                                      </button>
+                                      <button
+                                        onClick={() => setActiveDownloadMenu({ type: 'adobe', targetImages: [selectedImage] })}
+                                        className="p-2.5 bg-white hover:bg-slate-50 border border-slate-200 text-indigo-600 rounded-xl transition-all flex items-center gap-2 text-xs font-bold shadow-sm active:scale-95"
+                                        title="Download Adobe Stock CSV"
+                                      >
+                                        <Download className="w-4 h-4" />
+                                        Adobe Stock
+                                      </button>
+                                      <button
+                                        onClick={() => setActiveDownloadMenu({ type: 'shutterstock', targetImages: [selectedImage] })}
+                                        className="p-2.5 bg-white hover:bg-slate-50 border border-slate-200 text-indigo-600 rounded-xl transition-all flex items-center gap-2 text-xs font-bold shadow-sm active:scale-95"
+                                        title="Download Shutterstock CSV"
+                                      >
+                                        <Download className="w-4 h-4" />
+                                        Shutterstock
+                                      </button>
+                                    </motion.div>
                                   )}
                                 </AnimatePresence>
-                                
-                                {(!activeDownloadMenu || activeDownloadMenu.targetImages?.[0]?.id !== selectedImage.id) && (
-                                  <div className="flex items-center gap-2">
-                                    <button
-                                      onClick={() => downloadCSV([selectedImage])}
-                                      className="p-2.5 bg-white hover:bg-slate-50 border border-slate-200 text-indigo-600 rounded-xl transition-all flex items-center gap-2 text-xs font-bold shadow-sm active:scale-95"
-                                      title="Download Freepik CSV"
-                                    >
-                                      <Download className="w-4 h-4" />
-                                      Freepik
-                                    </button>
-                                    <button
-                                      onClick={() => setActiveDownloadMenu({ type: 'adobe', targetImages: [selectedImage] })}
-                                      className="p-2.5 bg-white hover:bg-slate-50 border border-slate-200 text-indigo-600 rounded-xl transition-all flex items-center gap-2 text-xs font-bold shadow-sm active:scale-95"
-                                      title="Download Adobe Stock CSV"
-                                    >
-                                      <Download className="w-4 h-4" />
-                                      Adobe Stock
-                                    </button>
-                                    <button
-                                      onClick={() => setActiveDownloadMenu({ type: 'shutterstock', targetImages: [selectedImage] })}
-                                      className="p-2.5 bg-white hover:bg-slate-50 border border-slate-200 text-indigo-600 rounded-xl transition-all flex items-center gap-2 text-xs font-bold shadow-sm active:scale-95"
-                                      title="Download Shutterstock CSV"
-                                    >
-                                      <Download className="w-4 h-4" />
-                                      Shutterstock
-                                    </button>
-                                  </div>
-                                )}
                               </div>
                             )}
                           </>
@@ -1442,6 +1462,136 @@ export default function App() {
                   <Info className="w-5 h-5 text-indigo-500 shrink-0" />
                   <p className="text-[11px] text-indigo-700 leading-relaxed">
                     Gunakan beberapa API Key untuk menghindari limit kuota. Sistem akan otomatis mengganti key jika terjadi error saat proses generate.
+                  </p>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Info Page Modal */}
+      <AnimatePresence>
+        {showInfoPage && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowInfoPage(false)}
+              className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="relative w-full max-w-2xl max-h-[85vh] bg-white rounded-3xl shadow-2xl overflow-hidden flex flex-col"
+            >
+              <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-white sticky top-0 z-10">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center">
+                    <Info className="w-5 h-5 text-indigo-600" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-bold text-slate-800">Informasi Website</h2>
+                    <p className="text-xs text-slate-500">Panduan fitur AI Metadata Generator</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setShowInfoPage(false)}
+                  className="p-2 hover:bg-slate-100 rounded-xl transition-colors text-slate-400 hover:text-slate-600"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="p-6 overflow-y-auto space-y-6">
+                <div className="space-y-4">
+                  <div className="flex gap-4">
+                    <div className="w-8 h-8 shrink-0 rounded-full bg-blue-50 flex items-center justify-center mt-1">
+                      <Sparkles className="w-4 h-4 text-blue-600" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-800 mb-1">Generate Metadata Otomatis</h3>
+                      <p className="text-xs text-slate-600 leading-relaxed">
+                        Aplikasi ini menggunakan teknologi AI (Google Gemini) untuk menganalisis gambar Anda dan secara otomatis membuatkan Judul, Deskripsi, serta Kata Kunci (Keywords) yang relevan dan SEO-friendly untuk keperluan microstock.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-4">
+                    <div className="w-8 h-8 shrink-0 rounded-full bg-purple-50 flex items-center justify-center mt-1">
+                      <Key className="w-4 h-4 text-purple-600" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-800 mb-1">Multi API Key (Rotasi)</h3>
+                      <p className="text-xs text-slate-600 leading-relaxed">
+                        Anda dapat memasukkan lebih dari satu Gemini API Key. Sistem akan menggunakan key tersebut secara bergantian untuk menghindari limit (Rate Limit) dan mempercepat proses generate metadata dalam jumlah banyak.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-4">
+                    <div className="w-8 h-8 shrink-0 rounded-full bg-amber-50 flex items-center justify-center mt-1">
+                      <Edit3 className="w-4 h-4 text-amber-600" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-800 mb-1">Edit & Simpan Metadata</h3>
+                      <p className="text-xs text-slate-600 leading-relaxed">
+                        Hasil generate AI tidak selalu sempurna. Anda dapat mengedit Judul, Deskripsi, dan Kata Kunci secara manual langsung di dalam aplikasi, lalu menyimpannya sebelum mengunduh file CSV.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-4">
+                    <div className="w-8 h-8 shrink-0 rounded-full bg-emerald-50 flex items-center justify-center mt-1">
+                      <Settings className="w-4 h-4 text-emerald-600" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-800 mb-1">Pengaturan Fleksibel</h3>
+                      <p className="text-xs text-slate-600 leading-relaxed">
+                        Atur panjang minimal kata untuk Judul (5-20 kata) dan jumlah Kata Kunci (hingga 50 kata) sesuai dengan standar agensi microstock yang Anda tuju. Tersedia juga pilihan model AI yang bisa disesuaikan.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-4">
+                    <div className="w-8 h-8 shrink-0 rounded-full bg-rose-50 flex items-center justify-center mt-1">
+                      <Download className="w-4 h-4 text-rose-600" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-800 mb-1">Export CSV Multi-Platform</h3>
+                      <p className="text-xs text-slate-600 leading-relaxed">
+                        Unduh metadata dalam format CSV yang sudah disesuaikan dengan standar Freepik, Adobe Stock, dan Shutterstock. Anda bisa memilih ekstensi file (.eps, .jpg, .png) dan memilih untuk mengunduh semua gambar atau hanya gambar yang dipilih.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-8 pt-6 border-t border-slate-100">
+                  <h3 className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2">
+                    <History className="w-4 h-4 text-indigo-600" />
+                    Perubahan Terbaru (Changelog)
+                  </h3>
+                  <div className="space-y-3">
+                    <div className="relative pl-4 border-l-2 border-indigo-100">
+                      <div className="absolute w-2 h-2 bg-indigo-500 rounded-full -left-[5px] top-1.5 ring-4 ring-white" />
+                      <p className="text-xs font-bold text-slate-700">Update Terbaru</p>
+                      <ul className="mt-2 space-y-2 text-xs text-slate-600 list-disc list-inside">
+                        <li><span className="font-medium text-emerald-600">Fitur Baru:</span> Halaman Informasi & Changelog (halaman ini).</li>
+                        <li><span className="font-medium text-emerald-600">Fitur Baru:</span> Pilihan cakupan ekspor (Download Semua Gambar vs Gambar Terpilih Saja).</li>
+                        <li><span className="font-medium text-blue-600">Peningkatan:</span> UI pemilihan ekstensi file (.eps, .jpg, .png) diubah dari dropdown menjadi tombol inline agar lebih mudah diklik.</li>
+                        <li><span className="font-medium text-blue-600">Peningkatan:</span> Pengaturan batas minimal kata untuk Judul (5-20 kata).</li>
+                        <li><span className="font-medium text-emerald-600">Fitur Baru:</span> Edit metadata (Judul, Deskripsi, Kata Kunci) secara manual sebelum diunduh.</li>
+                        <li><span className="font-medium text-emerald-600">Fitur Baru:</span> Rotasi Multi API Key untuk mencegah limit (Rate Limit).</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                  <p className="text-xs text-slate-500 text-center">
+                    Dibuat untuk mempermudah alur kerja kontributor microstock.
                   </p>
                 </div>
               </div>
