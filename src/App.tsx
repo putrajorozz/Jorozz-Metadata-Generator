@@ -22,10 +22,35 @@ import {
   Menu,
   Settings,
   Edit3,
-  History
+  History,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 import { GoogleGenAI, Type } from "@google/genai";
 import { cn } from './lib/utils';
+
+const CHANGELOG_DATA = [
+  {
+    id: "v1.2.0",
+    date: "7 April 2026",
+    title: "Update UI & Export Options",
+    changes: [
+      { type: "new", text: "Halaman Informasi & Changelog dengan riwayat versi (buka/tutup)." },
+      { type: "new", text: "Pilihan cakupan ekspor (Download Semua Gambar vs Gambar Terpilih Saja)." },
+      { type: "improvement", text: "UI pemilihan ekstensi file (.eps, .jpg, .png) diubah menjadi tombol inline agar lebih mudah diklik." }
+    ]
+  },
+  {
+    id: "v1.1.0",
+    date: "6 April 2026",
+    title: "Metadata Editor & Multi API Key",
+    changes: [
+      { type: "improvement", text: "Pengaturan batas minimal kata untuk Judul (5-20 kata)." },
+      { type: "new", text: "Edit metadata (Judul, Deskripsi, Kata Kunci) secara manual sebelum diunduh." },
+      { type: "new", text: "Rotasi Multi API Key untuk mencegah limit (Rate Limit)." }
+    ]
+  }
+];
 
 interface ImageData {
   id: string;
@@ -88,6 +113,13 @@ export default function App() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState<{ title: string; description: string; keywords: string } | null>(null);
+  const [expandedLogs, setExpandedLogs] = useState<string[]>([CHANGELOG_DATA[0].id]);
+
+  const toggleLog = (id: string) => {
+    setExpandedLogs(prev => 
+      prev.includes(id) ? prev.filter(v => v !== id) : [...prev, id]
+    );
+  };
 
   const startEditing = () => {
     if (selectedImage?.metadata) {
@@ -1574,18 +1606,45 @@ export default function App() {
                     Perubahan Terbaru (Changelog)
                   </h3>
                   <div className="space-y-3">
-                    <div className="relative pl-4 border-l-2 border-indigo-100">
-                      <div className="absolute w-2 h-2 bg-indigo-500 rounded-full -left-[5px] top-1.5 ring-4 ring-white" />
-                      <p className="text-xs font-bold text-slate-700">Update Terbaru</p>
-                      <ul className="mt-2 space-y-2 text-xs text-slate-600 list-disc list-inside">
-                        <li><span className="font-medium text-emerald-600">Fitur Baru:</span> Halaman Informasi & Changelog (halaman ini).</li>
-                        <li><span className="font-medium text-emerald-600">Fitur Baru:</span> Pilihan cakupan ekspor (Download Semua Gambar vs Gambar Terpilih Saja).</li>
-                        <li><span className="font-medium text-blue-600">Peningkatan:</span> UI pemilihan ekstensi file (.eps, .jpg, .png) diubah dari dropdown menjadi tombol inline agar lebih mudah diklik.</li>
-                        <li><span className="font-medium text-blue-600">Peningkatan:</span> Pengaturan batas minimal kata untuk Judul (5-20 kata).</li>
-                        <li><span className="font-medium text-emerald-600">Fitur Baru:</span> Edit metadata (Judul, Deskripsi, Kata Kunci) secara manual sebelum diunduh.</li>
-                        <li><span className="font-medium text-emerald-600">Fitur Baru:</span> Rotasi Multi API Key untuk mencegah limit (Rate Limit).</li>
-                      </ul>
-                    </div>
+                    {CHANGELOG_DATA.map((log) => {
+                      const isExpanded = expandedLogs.includes(log.id);
+                      return (
+                        <div key={log.id} className="border border-slate-100 rounded-xl overflow-hidden">
+                          <button
+                            onClick={() => toggleLog(log.id)}
+                            className="w-full flex items-center justify-between p-3 bg-slate-50 hover:bg-slate-100 transition-colors text-left"
+                          >
+                            <div>
+                              <p className="text-xs font-bold text-slate-700">{log.date} <span className="font-normal text-slate-500 ml-2">({log.title})</span></p>
+                            </div>
+                            {isExpanded ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+                          </button>
+                          <AnimatePresence>
+                            {isExpanded && (
+                              <motion.div
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: 'auto', opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                className="overflow-hidden"
+                              >
+                                <div className="p-4 bg-white border-t border-slate-100">
+                                  <ul className="space-y-2 text-xs text-slate-600 list-disc list-inside">
+                                    {log.changes.map((change, idx) => (
+                                      <li key={idx}>
+                                        <span className={cn("font-medium", change.type === 'new' ? "text-emerald-600" : change.type === 'fix' ? "text-rose-600" : "text-blue-600")}>
+                                          {change.type === 'new' ? 'Fitur Baru:' : change.type === 'fix' ? 'Bug Fix:' : 'Peningkatan:'}
+                                        </span>{' '}
+                                        {change.text}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
 
