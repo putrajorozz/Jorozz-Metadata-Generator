@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { GoogleGenAI, Type } from "@google/genai";
 import { cn } from './lib/utils';
+import { initDB, saveToHistory, getHistory, deleteFromHistory, clearHistory, cleanupOldHistory } from './lib/db';
 
 const CHANGELOG_DATA = [
   {
@@ -109,17 +110,41 @@ export default function App() {
   });
   const [showKeyModal, setShowKeyModal] = useState(false);
   const [showInfoPage, setShowInfoPage] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [historyItems, setHistoryItems] = useState<any[]>([]);
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+  }>({ isOpen: false, title: '', message: '', onConfirm: () => {} });
   const [newKey, setNewKey] = useState('');
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState<{ title: string; description: string; keywords: string } | null>(null);
   const [expandedLogs, setExpandedLogs] = useState<string[]>([CHANGELOG_DATA[0].id]);
 
+  useEffect(() => {
+    cleanupOldHistory();
+  }, []);
+
   const toggleLog = (id: string) => {
     setExpandedLogs(prev => 
       prev.includes(id) ? prev.filter(v => v !== id) : [...prev, id]
     );
   };
+
+  const loadHistory = async () => {
+    const items = await getHistory();
+    setHistoryItems(items);
+  };
+
+  useEffect(() => {
+    if (showHistoryModal) {
+      loadHistory();
+    }
+  }, [showHistoryModal]);
 
   const startEditing = () => {
     if (selectedImage?.metadata) {
@@ -132,22 +157,27 @@ export default function App() {
     }
   };
 
-  const saveEdit = () => {
+  const saveEdit = async () => {
     if (editData && selectedId) {
       const keywordsArray = editData.keywords.split(',').map(k => k.trim()).filter(k => k !== '');
-      setImages(prev => prev.map(img => 
-        img.id === selectedId 
-          ? { 
-              ...img, 
-              metadata: img.metadata ? {
-                ...img.metadata,
-                title: editData.title,
-                description: editData.description,
-                keywords: keywordsArray
-              } : null
-            } 
-          : img
-      ));
+      
+      const updatedImage = images.find(img => img.id === selectedId);
+      if (updatedImage && updatedImage.metadata) {
+        const newImage = {
+          ...updatedImage,
+          metadata: {
+            ...updatedImage.metadata,
+            title: editData.title,
+            description: editData.description,
+            keywords: keywordsArray
+          }
+        };
+        
+        setImages(prev => prev.map(img => img.id === selectedId ? newImage : img));
+        const processed = await processImage(newImage.file);
+        await saveToHistory(newImage, processed);
+      }
+      
       setIsEditing(false);
       setEditData(null);
       addToast("Metadata berhasil diperbarui", "success");
@@ -227,13 +257,66 @@ export default function App() {
     noClick: true
   });
 
+  const processImage = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const MAX_WIDTH = 400;
+          const scaleSize = MAX_WIDTH / img.width;
+          canvas.width = MAX_WIDTH;
+          canvas.height = img.height * scaleSize;
+          const ctx = canvas.getContext('2d');
+          ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
+          resolve(canvas.toDataURL('image/jpeg', 0.6));
+        };
+        img.src = e.target?.result as string;
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  };
+
   const removeImage = (id: string) => {
-    setImages(prev => {
-      const filtered = prev.filter(img => img.id !== id);
-      if (selectedId === id) {
-        setSelectedId(filtered.length > 0 ? filtered[0].id : null);
+    setConfirmModal({
+      isOpen: true,
+      title: 'Hapus Gambar',
+      message: 'Apakah Anda yakin ingin menghapus gambar ini?',
+      onConfirm: () => {
+        setImages(prev => {
+          const filtered = prev.filter(img => img.id !== id);
+          if (selectedId === id) {
+            setSelectedId(filtered.length > 0 ? filtered[0].id : null);
+          }
+          return filtered;
+        });
       }
-      return filtered;
+    });
+  };
+
+  const removeHistoryItem = (id: string) => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'Hapus Riwayat',
+      message: 'Apakah Anda yakin ingin menghapus item riwayat ini?',
+      onConfirm: async () => {
+        await deleteFromHistory(id);
+        loadHistory();
+      }
+    });
+  };
+
+  const handleClearHistory = () => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'Hapus Semua Riwayat',
+      message: 'Apakah Anda yakin ingin menghapus semua riwayat?',
+      onConfirm: async () => {
+        await clearHistory();
+        loadHistory();
+      }
     });
   };
 
@@ -256,12 +339,13 @@ export default function App() {
   const generateMetadata = async () => {
     if (images.length === 0 || isGenerating) return;
 
-    const activeKeys = apiKeys.length > 0 ? apiKeys : [process.env.GEMINI_API_KEY || ""];
-    if (activeKeys.length === 1 && !activeKeys[0]) {
-      addToast("Silakan masukkan API Key Gemini terlebih dahulu", "error");
+    if (apiKeys.length === 0) {
+      addToast("Silakan masukkan API Key Anda terlebih dahulu untuk memulai", "error");
       setShowKeyModal(true);
       return;
     }
+
+    const activeKeys = apiKeys;
 
     setIsGenerating(true);
     setProgress(0);
@@ -339,22 +423,26 @@ export default function App() {
           });
 
           const result = JSON.parse(response.text || "{}");
+          
+          const updatedMetadata = {
+            title: result.title,
+            description: result.description,
+            keywords: result.keywords.slice(0, 50),
+            categories: result.categories.slice(0, 2),
+            adobeCategory: result.adobeCategory,
+            prompt: promptText,
+            model: selectedModel
+          };
 
-          setImages(prev => prev.map(i => 
-            i.id === img.id ? { 
-              ...i, 
-              status: 'completed', 
-              metadata: {
-                title: result.title,
-                description: result.description,
-                keywords: result.keywords.slice(0, 50),
-                categories: result.categories.slice(0, 2),
-                adobeCategory: result.adobeCategory,
-                prompt: promptText,
-                model: selectedModel
-              } 
-            } : i
-          ));
+          const updatedImage = { 
+            ...img, 
+            status: 'completed' as const, 
+            metadata: updatedMetadata 
+          };
+
+          setImages(prev => prev.map(i => i.id === img.id ? updatedImage : i));
+          const processed = await processImage(updatedImage.file);
+          await saveToHistory(updatedImage, processed);
           success = true;
           addToast(`Berhasil generate: ${img.file.name}`, "success");
           
@@ -390,12 +478,13 @@ export default function App() {
     const img = images.find(i => i.id === id);
     if (!img || isGenerating) return;
 
-    const activeKeys = apiKeys.length > 0 ? apiKeys : [process.env.GEMINI_API_KEY || ""];
-    if (activeKeys.length === 1 && !activeKeys[0]) {
-      addToast("Silakan masukkan API Key Gemini terlebih dahulu", "error");
+    if (apiKeys.length === 0) {
+      addToast("Silakan masukkan API Key Anda terlebih dahulu untuk memulai", "error");
       setShowKeyModal(true);
       return;
     }
+
+    const activeKeys = apiKeys;
 
     setImages(prev => prev.map(i => i.id === id ? { ...i, status: 'processing' } : i));
     
@@ -456,32 +545,46 @@ export default function App() {
           }
         });
 
-        const result = JSON.parse(response.text || "{}");
+        if (!response.text) {
+          throw new Error("Empty response from Gemini API");
+        }
 
-        setImages(prev => prev.map(i => 
-          i.id === id ? { 
-            ...i, 
-            status: 'completed', 
-            metadata: {
-              title: result.title,
-              description: result.description,
-              keywords: result.keywords.slice(0, 50),
-              categories: result.categories.slice(0, 2),
-              adobeCategory: result.adobeCategory,
-              prompt: promptText,
-              model: selectedModel
-            } 
-          } : i
-        ));
+        const result = JSON.parse(response.text);
+
+        const updatedMetadata = {
+          title: result.title,
+          description: result.description,
+          keywords: result.keywords.slice(0, 50),
+          categories: result.categories.slice(0, 2),
+          adobeCategory: result.adobeCategory,
+          prompt: promptText,
+          model: selectedModel
+        };
+
+        const updatedImage = { 
+          ...img, 
+          status: 'completed' as const, 
+          metadata: updatedMetadata 
+        };
+
+        setImages(prev => prev.map(i => i.id === id ? updatedImage : i));
+        const processed = await processImage(updatedImage.file);
+        await saveToHistory(updatedImage, processed);
         success = true;
         addToast(`Berhasil regenerate: ${img.file.name}`, "success");
       } catch (error) {
         console.error(`Error with key ${currentKeyIndex}:`, error);
+        
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        if (errorMessage.includes("API_KEY_INVALID") || errorMessage.includes("403") || errorMessage.includes("401")) {
+          addToast(`API Key tidak valid: ${currentKey.substring(0, 8)}...`, "error");
+        } else {
+          addToast(`API Key error, mencoba key berikutnya...`, "info");
+        }
+        
         currentKeyIndex = (currentKeyIndex + 1) % activeKeys.length;
         retryCount++;
-        if (retryCount < maxRetries) {
-          addToast(`API Key error, mencoba key berikutnya...`, "info");
-        } else {
+        if (retryCount >= maxRetries) {
           setImages(prev => prev.map(i => 
             i.id === id ? { ...i, status: 'error', error: "Semua API Key gagal atau kuota habis" } : i
           ));
@@ -593,6 +696,13 @@ export default function App() {
 
   const handleAddKey = () => {
     if (!newKey.trim()) return;
+    
+    // Basic validation: Gemini API keys usually start with AIza
+    if (!newKey.trim().startsWith("AIza")) {
+      addToast("Format API Key tidak valid. Pastikan Anda memasukkan API Key Gemini yang benar (dimulai dengan 'AIza').", "error");
+      return;
+    }
+
     const updated = [...apiKeys, newKey.trim()];
     setApiKeys(updated);
     localStorage.setItem('gemini_api_keys', JSON.stringify(updated));
@@ -711,6 +821,13 @@ export default function App() {
                 {apiKeys.length > 0 && (
                   <span className="absolute top-1 right-1 w-2 h-2 bg-indigo-500 rounded-full border border-white" />
                 )}
+              </button>
+              <button 
+                onClick={() => setShowHistoryModal(true)}
+                className="p-2 hover:bg-slate-100 rounded-xl text-slate-500 transition-colors"
+                title="Riwayat Generate"
+              >
+                <History className="w-4 h-4" />
               </button>
               <button 
                 onClick={() => setShowInfoPage(true)}
@@ -862,58 +979,70 @@ export default function App() {
 
                     {/* AI Settings above Generate All */}
                     <div className="mt-8 pt-6 border-t border-slate-100">
-                      <div className="flex flex-col sm:flex-row gap-6 sm:gap-12">
-                        <div className="flex-1 space-y-3">
-                          <div className="flex justify-between items-center">
-                            <label className="text-[10px] uppercase tracking-wider font-bold text-slate-500">Minimal Kata Judul</label>
-                            <span className="text-xs font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md">{minTitleWords} kata</span>
-                          </div>
-                          <input 
-                            type="range" 
-                            min="5" 
-                            max="20" 
-                            value={minTitleWords} 
-                            onChange={(e) => setMinTitleWords(parseInt(e.target.value))}
-                            className="w-full h-1.5 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-indigo-600"
-                          />
-                        </div>
-                        <div className="flex-1 space-y-3">
-                          <div className="flex justify-between items-center">
-                            <label className="text-[10px] uppercase tracking-wider font-bold text-slate-500">Jumlah Kata Kunci</label>
-                            <span className="text-xs font-bold text-purple-600 bg-purple-50 px-2 py-0.5 rounded-md">{keywordCount} keywords</span>
-                          </div>
-                          <input 
-                            type="range" 
-                            min="10" 
-                            max="50" 
-                            value={keywordCount} 
-                            onChange={(e) => setKeywordCount(parseInt(e.target.value))}
-                            className="w-full h-1.5 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-purple-600"
-                          />
-                        </div>
-                      </div>
+                      <button 
+                        onClick={() => setShowSettings(!showSettings)}
+                        className="flex items-center gap-2 text-xs font-bold text-slate-500 hover:text-indigo-600 transition-colors mb-4"
+                      >
+                        {showSettings ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                        Pengaturan AI
+                      </button>
                       
-                      <div className="mt-6 flex items-center justify-center gap-4">
-                        <label className="flex items-center gap-2 cursor-pointer group">
-                          <div className="relative">
-                            <input 
-                              type="checkbox" 
-                              className="sr-only" 
-                              checked={autoProcess}
-                              onChange={(e) => setAutoProcess(e.target.checked)}
-                            />
-                            <div className={cn(
-                              "w-10 h-5 rounded-full transition-colors",
-                              autoProcess ? "bg-indigo-500" : "bg-slate-200"
-                            )} />
-                            <div className={cn(
-                              "absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform shadow-sm",
-                              autoProcess ? "translate-x-5" : "translate-x-0"
-                            )} />
+                      {showSettings && (
+                        <div className="space-y-6">
+                          <div className="flex flex-col sm:flex-row gap-6 sm:gap-12">
+                            <div className="flex-1 space-y-3">
+                              <div className="flex justify-between items-center">
+                                <label className="text-[10px] uppercase tracking-wider font-bold text-slate-500">Minimal Kata Judul</label>
+                                <span className="text-xs font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md">{minTitleWords} kata</span>
+                              </div>
+                              <input 
+                                type="range" 
+                                min="5" 
+                                max="20" 
+                                value={minTitleWords} 
+                                onChange={(e) => setMinTitleWords(parseInt(e.target.value))}
+                                className="w-full h-1.5 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                              />
+                            </div>
+                            <div className="flex-1 space-y-3">
+                              <div className="flex justify-between items-center">
+                                <label className="text-[10px] uppercase tracking-wider font-bold text-slate-500">Jumlah Kata Kunci</label>
+                                <span className="text-xs font-bold text-purple-600 bg-purple-50 px-2 py-0.5 rounded-md">{keywordCount} keywords</span>
+                              </div>
+                              <input 
+                                type="range" 
+                                min="10" 
+                                max="50" 
+                                value={keywordCount} 
+                                onChange={(e) => setKeywordCount(parseInt(e.target.value))}
+                                className="w-full h-1.5 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-purple-600"
+                              />
+                            </div>
                           </div>
-                          <span className="text-xs font-bold text-slate-600 group-hover:text-indigo-600 transition-colors">Auto Process</span>
-                        </label>
-                      </div>
+                          
+                          <div className="mt-6 flex items-center justify-center gap-4">
+                            <label className="flex items-center gap-2 cursor-pointer group">
+                              <div className="relative">
+                                <input 
+                                  type="checkbox" 
+                                  className="sr-only" 
+                                  checked={autoProcess}
+                                  onChange={(e) => setAutoProcess(e.target.checked)}
+                                />
+                                <div className={cn(
+                                  "w-10 h-5 rounded-full transition-colors",
+                                  autoProcess ? "bg-indigo-500" : "bg-slate-200"
+                                )} />
+                                <div className={cn(
+                                  "absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform shadow-sm",
+                                  autoProcess ? "translate-x-5" : "translate-x-0"
+                                )} />
+                              </div>
+                              <span className="text-xs font-bold text-slate-600 group-hover:text-indigo-600 transition-colors">Auto Process</span>
+                            </label>
+                          </div>
+                        </div>
+                      )}
 
                       <p className="text-[9px] text-slate-400 mt-4 italic text-center">
                         * Pengaturan ini akan diterapkan pada proses generate berikutnya.
@@ -927,9 +1056,11 @@ export default function App() {
                         disabled={isGenerating || !images.some(img => img.status === 'pending' || img.status === 'error')}
                         className={cn(
                           "px-8 py-3 rounded-2xl text-sm font-bold flex items-center gap-3 transition-all shadow-xl",
-                          isGenerating 
-                            ? "bg-slate-100 text-slate-400 cursor-not-allowed"
-                            : "bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-200 active:scale-95"
+                          apiKeys.length === 0
+                            ? "bg-slate-200 text-slate-500 opacity-60 hover:opacity-80"
+                            : isGenerating 
+                              ? "bg-slate-100 text-slate-400 cursor-not-allowed"
+                              : "bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-200 active:scale-95"
                         )}
                       >
                         {isGenerating ? (
@@ -1119,9 +1250,11 @@ export default function App() {
                               disabled={isGenerating}
                               className={cn(
                                 "p-2.5 border rounded-xl transition-all flex items-center gap-2 text-xs font-bold shadow-sm",
-                                selectedImage.status === 'completed' 
-                                  ? "bg-white hover:bg-indigo-50 border-slate-200 text-indigo-600"
-                                  : "bg-indigo-600 hover:bg-indigo-700 border-indigo-500 text-white"
+                                apiKeys.length === 0
+                                  ? "bg-slate-100 border-slate-200 text-slate-400 opacity-60 hover:opacity-80"
+                                  : selectedImage.status === 'completed' 
+                                    ? "bg-white hover:bg-indigo-50 border-slate-200 text-indigo-600"
+                                    : "bg-indigo-600 hover:bg-indigo-700 border-indigo-500 text-white"
                               )}
                               title={selectedImage.status === 'completed' ? "Regenerate metadata" : "Generate metadata"}
                             >
@@ -1368,7 +1501,12 @@ export default function App() {
                         </div>
                         <button 
                           onClick={generateMetadata}
-                          className="py-2 px-6 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-medium transition-all shadow-lg shadow-indigo-100"
+                          className={cn(
+                            "py-2 px-6 rounded-xl text-sm font-medium transition-all shadow-lg",
+                            apiKeys.length === 0
+                              ? "bg-slate-200 text-slate-500 opacity-60 hover:opacity-80"
+                              : "bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-100"
+                          )}
                         >
                           Coba Lagi
                         </button>
@@ -1496,6 +1634,112 @@ export default function App() {
                     Gunakan beberapa API Key untuk menghindari limit kuota. Sistem akan otomatis mengganti key jika terjadi error saat proses generate.
                   </p>
                 </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* History Modal */}
+      <AnimatePresence>
+        {showHistoryModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowHistoryModal(false)}
+              className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="relative w-full max-w-4xl max-h-[85vh] bg-white rounded-3xl shadow-2xl overflow-hidden flex flex-col"
+            >
+              <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-white sticky top-0 z-10">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center">
+                    <History className="w-5 h-5 text-indigo-600" />
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-bold text-slate-800">Riwayat Generate</h2>
+                    <p className="text-xs text-slate-500">Metadata yang pernah Anda buat sebelumnya. Data akan otomatis dihapus setelah 3 hari.</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {historyItems.length > 0 && (
+                    <button 
+                      onClick={handleClearHistory}
+                      className="px-3 py-1.5 text-xs font-bold text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors"
+                    >
+                      Hapus Semua
+                    </button>
+                  )}
+                  <button 
+                    onClick={() => setShowHistoryModal(false)}
+                    className="p-2 hover:bg-slate-100 rounded-xl transition-colors text-slate-400 hover:text-slate-600"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-6 overflow-y-auto flex-1 bg-slate-50/50">
+                {historyItems.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center h-40 text-slate-400">
+                    <History className="w-12 h-12 mb-3 opacity-20" />
+                    <p className="text-sm font-medium">Belum ada riwayat generate metadata.</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {historyItems.map((item) => {
+                      const previewUrl = URL.createObjectURL(item.file);
+                      return (
+                        <div key={item.id} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex gap-4">
+                          <img src={previewUrl} alt="Preview" className="w-24 h-24 object-cover rounded-xl bg-slate-100" onLoad={() => URL.revokeObjectURL(previewUrl)} />
+                          <div className="flex-1 min-w-0 flex flex-col">
+                            <h4 className="text-sm font-bold text-slate-800 truncate" title={item.metadata?.title}>{item.metadata?.title || 'Tanpa Judul'}</h4>
+                            <p className="text-xs text-slate-500 mt-1 line-clamp-2">{item.metadata?.description}</p>
+                            <div className="mt-auto pt-3 flex items-center justify-between">
+                              <span className="text-[10px] text-slate-400 font-medium">
+                                {new Date(item.timestamp).toLocaleString('id-ID')}
+                              </span>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  onClick={() => removeHistoryItem(item.id)}
+                                  className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                                  title="Hapus"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    const newImage: ImageData = {
+                                      ...item,
+                                      preview: URL.createObjectURL(item.file)
+                                    };
+                                    setImages(prev => {
+                                      if (!prev.find(p => p.id === item.id)) {
+                                        return [...prev, newImage];
+                                      }
+                                      return prev;
+                                    });
+                                    setShowHistoryModal(false);
+                                    setSelectedId(item.id);
+                                  }}
+                                  className="px-3 py-1.5 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 rounded-lg text-xs font-bold transition-colors"
+                                >
+                                  Buka di Workspace
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </motion.div>
           </div>
@@ -1658,6 +1902,32 @@ export default function App() {
           </div>
         )}
       </AnimatePresence>
+
+      {confirmModal.isOpen && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[120]">
+          <div className="bg-white p-6 rounded-lg shadow-xl max-w-sm w-full mx-4">
+            <h2 className="text-lg font-bold mb-4">{confirmModal.title}</h2>
+            <p className="text-slate-600 mb-6">{confirmModal.message}</p>
+            <div className="flex justify-end gap-4">
+              <button 
+                onClick={() => setConfirmModal({ ...confirmModal, isOpen: false })}
+                className="px-4 py-2 text-slate-600 hover:text-slate-800"
+              >
+                Batal
+              </button>
+              <button 
+                onClick={() => {
+                  confirmModal.onConfirm();
+                  setConfirmModal({ ...confirmModal, isOpen: false });
+                }}
+                className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
+              >
+                Hapus
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Toasts */}
       <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[110] flex flex-col gap-2 items-center pointer-events-none">
