@@ -598,15 +598,34 @@ export default function App() {
     const imagesToExport = targetImages || images.filter(img => img.status === 'completed' && img.metadata);
     if (imagesToExport.length === 0) return;
 
-    const headers = ["File name", "Title", "Keywords", "Prompt", "Model", "AI Generated"];
-    const rows = imagesToExport.map(img => [
-      img.file.name,
-      `"${img.metadata!.title.replace(/"/g, '""')}"`,
-      `"${img.metadata!.keywords.join(', ').replace(/"/g, '""')}"`,
-      `"${img.metadata!.prompt.replace(/"/g, '""').replace(/\n/g, ' ')}"`,
-      `"${img.metadata!.model}"`,
-      img.isAiGenerated ? "Yes" : "No"
-    ]);
+    const hasAiGenerated = imagesToExport.some(img => img.isAiGenerated);
+
+    const headers = ["File name", "Title", "Keywords"];
+    if (hasAiGenerated) {
+      headers.push("Prompt", "Model", "AI Generated");
+    }
+
+    const rows = imagesToExport.map(img => {
+      const row = [
+        img.file.name,
+        `"${img.metadata!.title.replace(/"/g, '""')}"`,
+        `"${img.metadata!.keywords.join(', ').replace(/"/g, '""')}"`
+      ];
+      
+      if (hasAiGenerated) {
+        if (img.isAiGenerated) {
+          row.push(
+            `"${img.metadata!.prompt.replace(/"/g, '""').replace(/\n/g, ' ')}"`,
+            `"${img.metadata!.model}"`,
+            "Yes"
+          );
+        } else {
+          row.push('""', '""', '"No"');
+        }
+      }
+      
+      return row;
+    });
 
     const csvContent = [headers, ...rows].map(e => e.join(";")).join("\n");
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
