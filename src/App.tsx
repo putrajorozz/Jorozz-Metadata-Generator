@@ -108,6 +108,8 @@ export default function App() {
     const saved = localStorage.getItem('gemini_api_keys');
     return saved ? JSON.parse(saved) : [];
   });
+  const [activeApiKey, setActiveApiKey] = useState<string | null>(null);
+  const [errorApiKeys, setErrorApiKeys] = useState<string[]>([]);
   const [showKeyModal, setShowKeyModal] = useState(false);
   const [showInfoPage, setShowInfoPage] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -349,6 +351,7 @@ export default function App() {
 
     setIsGenerating(true);
     setProgress(0);
+    setErrorApiKeys([]);
 
     const pendingImages = images.filter(img => img.status !== 'completed');
     let completedCount = 0;
@@ -365,6 +368,7 @@ export default function App() {
 
       while (!success && retryCount < maxRetries) {
         const currentKey = activeKeys[currentKeyIndex];
+        setActiveApiKey(currentKey);
         const ai = new GoogleGenAI({ apiKey: currentKey });
 
         try {
@@ -444,18 +448,27 @@ export default function App() {
           const processed = await processImage(updatedImage.file);
           await saveToHistory(updatedImage, processed);
           success = true;
+          setActiveApiKey(null);
           addToast(`Berhasil generate: ${img.file.name}`, "success");
           
           // Cycle to next key for next image even on success
           currentKeyIndex = (currentKeyIndex + 1) % activeKeys.length;
         } catch (error) {
           console.error(`Error with key ${currentKeyIndex}:`, error);
+          const failedKey = activeKeys[currentKeyIndex];
+          setErrorApiKeys(prev => [...new Set([...prev, failedKey])]);
+          
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          if (errorMessage.includes("API_KEY_INVALID") || errorMessage.includes("403") || errorMessage.includes("401")) {
+            addToast(`API Key tidak valid: ${failedKey.substring(0, 8)}...`, "error");
+          } else {
+            addToast(`API Key error, mencoba key berikutnya...`, "info");
+          }
+
           currentKeyIndex = (currentKeyIndex + 1) % activeKeys.length;
           retryCount++;
           
-          if (retryCount < maxRetries) {
-            addToast(`API Key error, mencoba key berikutnya...`, "info");
-          } else {
+          if (retryCount >= maxRetries) {
             setImages(prev => prev.map(i => 
               i.id === img.id ? { ...i, status: 'error', error: "Semua API Key gagal atau kuota habis" } : i
             ));
@@ -469,6 +482,7 @@ export default function App() {
     }
 
     setIsGenerating(false);
+    setActiveApiKey(null);
     if (images.every(img => img.status === 'completed')) {
       addToast("Semua gambar berhasil diproses!", "success");
     }
@@ -487,6 +501,7 @@ export default function App() {
     const activeKeys = apiKeys;
 
     setImages(prev => prev.map(i => i.id === id ? { ...i, status: 'processing' } : i));
+    setErrorApiKeys([]);
     
     let currentKeyIndex = 0;
     let success = false;
@@ -495,6 +510,7 @@ export default function App() {
 
     while (!success && retryCount < maxRetries) {
       const currentKey = activeKeys[currentKeyIndex];
+      setActiveApiKey(currentKey);
       const ai = new GoogleGenAI({ apiKey: currentKey });
 
       try {
@@ -571,9 +587,11 @@ export default function App() {
         const processed = await processImage(updatedImage.file);
         await saveToHistory(updatedImage, processed);
         success = true;
+        setActiveApiKey(null);
         addToast(`Berhasil regenerate: ${img.file.name}`, "success");
       } catch (error) {
         console.error(`Error with key ${currentKeyIndex}:`, error);
+        setErrorApiKeys(prev => [...new Set([...prev, activeKeys[currentKeyIndex]])]);
         
         const errorMessage = error instanceof Error ? error.message : String(error);
         if (errorMessage.includes("API_KEY_INVALID") || errorMessage.includes("403") || errorMessage.includes("401")) {
@@ -592,6 +610,7 @@ export default function App() {
         }
       }
     }
+    setActiveApiKey(null);
   };
 
   const downloadCSV = (targetImages?: ImageData[]) => {
@@ -730,9 +749,11 @@ export default function App() {
   };
 
   const removeKey = (index: number) => {
+    const keyToRemove = apiKeys[index];
     const updated = apiKeys.filter((_, i) => i !== index);
     setApiKeys(updated);
     localStorage.setItem('gemini_api_keys', JSON.stringify(updated));
+    setErrorApiKeys(prev => prev.filter(k => k !== keyToRemove));
     addToast("API Key dihapus", "info");
   };
 
@@ -1631,19 +1652,43 @@ export default function App() {
                   {apiKeys.length === 0 ? (
                     <p className="text-center text-slate-400 text-sm py-8">Belum ada API Key yang disimpan.</p>
                   ) : (
-                    apiKeys.map((key, i) => (
-                      <div key={i} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100">
-                        <span className="text-xs font-mono text-slate-500 truncate max-w-[200px]">
-                          {key.substring(0, 8)}••••••••{key.substring(key.length - 4)}
-                        </span>
-                        <button 
-                          onClick={() => removeKey(i)}
-                          className="p-1.5 hover:bg-red-50 text-red-400 rounded-lg transition-colors"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    ))
+                    apiKeys.map((key, i) => {
+                      const isActive = activeApiKey === key;
+                      const hasError = errorApiKeys.includes(key);
+                      
+                      return (
+                        <div key={i} className={cn(
+                          "flex items-center justify-between p-3 rounded-xl border transition-all",
+                          isActive ? "bg-indigo-50 border-indigo-200 shadow-sm" : 
+                          hasError ? "bg-red-50 border-red-200" :
+                          "bg-slate-50 border-slate-100"
+                        )}>
+                          <div className="flex items-center gap-3 min-w-0">
+                            {isActive ? (
+                              <Loader2 className="w-4 h-4 text-indigo-500 animate-spin shrink-0" />
+                            ) : hasError ? (
+                              <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
+                            ) : (
+                              <Key className="w-4 h-4 text-slate-400 shrink-0" />
+                            )}
+                            <span className={cn(
+                              "text-xs font-mono truncate max-w-[180px]",
+                              isActive ? "text-indigo-700 font-bold" : 
+                              hasError ? "text-red-700" :
+                              "text-slate-500"
+                            )}>
+                              {key.substring(0, 8)}••••••••{key.substring(key.length - 4)}
+                            </span>
+                          </div>
+                          <button 
+                            onClick={() => removeKey(i)}
+                            className="p-1.5 hover:bg-red-100 text-red-400 rounded-lg transition-colors shrink-0"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      );
+                    })
                   )}
                 </div>
 
