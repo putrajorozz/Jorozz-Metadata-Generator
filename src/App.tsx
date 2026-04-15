@@ -67,6 +67,8 @@ interface ImageData {
     adobeCategory: string;
     prompt: string;
     model: string;
+    usedModel: string;
+    usedApiKey: string;
   };
   error?: string;
 }
@@ -364,118 +366,138 @@ export default function App() {
       ));
 
       let success = false;
-      let retryCount = 0;
-      const maxRetries = activeKeys.length;
+      let modelIndex = MODELS.findIndex(m => m.id === selectedModel);
+      if (modelIndex === -1) modelIndex = 0;
+      
+      let modelsTried = 0;
+      const totalModels = MODELS.length;
 
-      while (!success && retryCount < maxRetries) {
-        const currentKey = activeKeys[currentKeyIndex];
-        setActiveApiKey(currentKey);
-        const ai = new GoogleGenAI({ apiKey: currentKey });
+      while (!success && modelsTried < totalModels) {
+        const currentModelId = MODELS[modelIndex].id;
+        let retryCount = 0;
+        const maxRetries = activeKeys.length;
 
-        try {
-          const base64Data = await fileToBase64(img.file);
-          let mimeType = img.file.type;
-          
-          const promptText = `Analyze this image for microstock metadata (Shutterstock, Adobe Stock, etc.). 
-                  Generate the following in JSON format:
-                  - title: A catchy, descriptive title focusing on the main subject (minimum ${minTitleWords} words, maximum ${Math.max(20, minTitleWords + 5)} words).
-                  - description: A detailed, SEO-friendly description including context, mood, and key elements (10-20 words).
-                  - keywords: Exactly ${keywordCount} relevant keywords as an array of strings. Include specific details, broad categories, and conceptual terms. No duplicates.
-                  - categories: Select exactly 2 most relevant categories from this list: [Abstract, Animals/Wildlife, Arts, Backgrounds/Textures, Beauty/Fashion, Buildings/Landmarks, Business/Finance, Celebrities, Education, Food and drink, Healthcare/Medical, Holidays, Industrial, Interiors, Miscellaneous, Nature, Objects, Parks/Outdoor, People, Religion, Science, Signs/Symbols, Sports/Recreation, Technology, Transportation, Vintage].
-                  - adobeCategory: Select exactly 1 most relevant category from this list: [Animals, Buildings And Architecture, Business, Drinks, The Environment, States of Mind, Food, Graphic Resources, Hobbies and Leisure, Industry, Landscapes, Lifestyle, People, Plants and Flowers, Culture and Religion, Science, Social Issues, Sports, Technology, Transport, Travel].
-                  
-                  All metadata must be in English.`;
-          
-          const response = await ai.models.generateContent({
-            model: selectedModel,
-            contents: {
-              parts: [
-                {
-                  inlineData: {
-                    mimeType: mimeType,
-                    data: base64Data,
+        while (!success && retryCount < maxRetries) {
+          const currentKey = activeKeys[currentKeyIndex];
+          setActiveApiKey(currentKey);
+          const ai = new GoogleGenAI({ apiKey: currentKey });
+
+          try {
+            const base64Data = await fileToBase64(img.file);
+            let mimeType = img.file.type;
+            
+            const promptText = `Analyze this image for microstock metadata (Shutterstock, Adobe Stock, etc.). 
+                    Generate the following in JSON format:
+                    - title: A catchy, descriptive title focusing on the main subject (minimum ${minTitleWords} words, maximum ${Math.max(20, minTitleWords + 5)} words).
+                    - description: A detailed, SEO-friendly description including context, mood, and key elements (10-20 words).
+                    - keywords: Exactly ${keywordCount} relevant keywords as an array of strings. Include specific details, broad categories, and conceptual terms. No duplicates.
+                    - categories: Select exactly 2 most relevant categories from this list: [Abstract, Animals/Wildlife, Arts, Backgrounds/Textures, Beauty/Fashion, Buildings/Landmarks, Business/Finance, Celebrities, Education, Food and drink, Healthcare/Medical, Holidays, Industrial, Interiors, Miscellaneous, Nature, Objects, Parks/Outdoor, People, Religion, Science, Signs/Symbols, Sports/Recreation, Technology, Transportation, Vintage].
+                    - adobeCategory: Select exactly 1 most relevant category from this list: [Animals, Buildings And Architecture, Business, Drinks, The Environment, States of Mind, Food, Graphic Resources, Hobbies and Leisure, Industry, Landscapes, Lifestyle, People, Plants and Flowers, Culture and Religion, Science, Social Issues, Sports, Technology, Transport, Travel].
+                    
+                    All metadata must be in English.`;
+            
+            const response = await ai.models.generateContent({
+              model: currentModelId,
+              contents: {
+                parts: [
+                  {
+                    inlineData: {
+                      mimeType: mimeType,
+                      data: base64Data,
+                    },
                   },
-                },
-                {
-                  text: promptText,
-                },
-              ],
-            },
-            config: {
-              responseMimeType: "application/json",
-              responseSchema: {
-                type: Type.OBJECT,
-                properties: {
-                  title: { type: Type.STRING },
-                  description: { type: Type.STRING },
-                  keywords: { 
-                    type: Type.ARRAY,
-                    items: { type: Type.STRING }
+                  {
+                    text: promptText,
                   },
-                  categories: {
-                    type: Type.ARRAY,
-                    items: { type: Type.STRING },
-                    description: "Exactly 2 categories from the provided list"
+                ],
+              },
+              config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                  type: Type.OBJECT,
+                  properties: {
+                    title: { type: Type.STRING },
+                    description: { type: Type.STRING },
+                    keywords: { 
+                      type: Type.ARRAY,
+                      items: { type: Type.STRING }
+                    },
+                    categories: {
+                      type: Type.ARRAY,
+                      items: { type: Type.STRING },
+                      description: "Exactly 2 categories from the provided list"
+                    },
+                    adobeCategory: {
+                      type: Type.STRING,
+                      description: "Exactly 1 category from the Adobe Stock list"
+                    }
                   },
-                  adobeCategory: {
-                    type: Type.STRING,
-                    description: "Exactly 1 category from the Adobe Stock list"
-                  }
-                },
-                required: ["title", "description", "keywords", "categories", "adobeCategory"]
+                  required: ["title", "description", "keywords", "categories", "adobeCategory"]
+                }
               }
+            });
+
+            const result = JSON.parse(response.text || "{}");
+            
+            const updatedMetadata = {
+              title: result.title,
+              description: result.description,
+              keywords: result.keywords.slice(0, 50),
+              categories: result.categories.slice(0, 2),
+              adobeCategory: result.adobeCategory,
+              prompt: promptText,
+              model: currentModelId,
+              usedModel: MODELS[modelIndex].name,
+              usedApiKey: currentKey.slice(-4)
+            };
+
+            const updatedImage = { 
+              ...img, 
+              status: 'completed' as const, 
+              metadata: updatedMetadata 
+            };
+
+            setImages(prev => prev.map(i => i.id === img.id ? updatedImage : i));
+            const processed = await processImage(updatedImage.file);
+            await saveToHistory(updatedImage, processed);
+            success = true;
+            setActiveApiKey(null);
+            addToast(`Berhasil generate: ${img.file.name}`, "success");
+            
+            // Cycle to next key for next image even on success
+            currentKeyIndex = (currentKeyIndex + 1) % activeKeys.length;
+          } catch (error) {
+            console.error(`Error with key ${currentKeyIndex} on model ${currentModelId}:`, error);
+            const failedKey = activeKeys[currentKeyIndex];
+            setErrorApiKeys(prev => [...new Set([...prev, failedKey])]);
+            
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            if (errorMessage.includes("API_KEY_INVALID") || errorMessage.includes("403") || errorMessage.includes("401")) {
+              addToast(`API Key tidak valid: ${failedKey.substring(0, 8)}...`, "error");
+            } else {
+              addToast(`API Key error, mencoba key berikutnya...`, "info");
             }
-          });
 
-          const result = JSON.parse(response.text || "{}");
-          
-          const updatedMetadata = {
-            title: result.title,
-            description: result.description,
-            keywords: result.keywords.slice(0, 50),
-            categories: result.categories.slice(0, 2),
-            adobeCategory: result.adobeCategory,
-            prompt: promptText,
-            model: selectedModel
-          };
-
-          const updatedImage = { 
-            ...img, 
-            status: 'completed' as const, 
-            metadata: updatedMetadata 
-          };
-
-          setImages(prev => prev.map(i => i.id === img.id ? updatedImage : i));
-          const processed = await processImage(updatedImage.file);
-          await saveToHistory(updatedImage, processed);
-          success = true;
-          setActiveApiKey(null);
-          addToast(`Berhasil generate: ${img.file.name}`, "success");
-          
-          // Cycle to next key for next image even on success
-          currentKeyIndex = (currentKeyIndex + 1) % activeKeys.length;
-        } catch (error) {
-          console.error(`Error with key ${currentKeyIndex}:`, error);
-          const failedKey = activeKeys[currentKeyIndex];
-          setErrorApiKeys(prev => [...new Set([...prev, failedKey])]);
-          
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          if (errorMessage.includes("API_KEY_INVALID") || errorMessage.includes("403") || errorMessage.includes("401")) {
-            addToast(`API Key tidak valid: ${failedKey.substring(0, 8)}...`, "error");
-          } else {
-            addToast(`API Key error, mencoba key berikutnya...`, "info");
-          }
-
-          currentKeyIndex = (currentKeyIndex + 1) % activeKeys.length;
-          retryCount++;
-          
-          if (retryCount >= maxRetries) {
-            setImages(prev => prev.map(i => 
-              i.id === img.id ? { ...i, status: 'error', error: "Semua API Key gagal atau kuota habis" } : i
-            ));
-            addToast(`Gagal generate: ${img.file.name}`, "error");
+            currentKeyIndex = (currentKeyIndex + 1) % activeKeys.length;
+            retryCount++;
           }
         }
+
+        if (!success) {
+          // Rotate to next model
+          modelIndex = (modelIndex + 1) % MODELS.length;
+          modelsTried++;
+          if (modelsTried < totalModels) {
+            addToast(`Model ${currentModelId} limit, mencoba model ${MODELS[modelIndex].name}...`, "info");
+          }
+        }
+      }
+
+      if (!success) {
+        setImages(prev => prev.map(i => 
+          i.id === img.id ? { ...i, status: 'error', error: "Semua API Key dan Model gagal atau kuota habis" } : i
+        ));
+        addToast(`Gagal generate: ${img.file.name}`, "error");
       }
 
       completedCount++;
@@ -506,110 +528,133 @@ export default function App() {
     
     let currentKeyIndex = 0;
     let success = false;
-    let retryCount = 0;
-    const maxRetries = activeKeys.length;
+    
+    let modelIndex = MODELS.findIndex(m => m.id === selectedModel);
+    if (modelIndex === -1) modelIndex = 0;
+    
+    let modelsTried = 0;
+    const totalModels = MODELS.length;
 
-    while (!success && retryCount < maxRetries) {
-      const currentKey = activeKeys[currentKeyIndex];
-      setActiveApiKey(currentKey);
-      const ai = new GoogleGenAI({ apiKey: currentKey });
+    while (!success && modelsTried < totalModels) {
+      const currentModelId = MODELS[modelIndex].id;
+      let retryCount = 0;
+      const maxRetries = activeKeys.length;
 
-      try {
-        const base64Data = await fileToBase64(img.file);
-        let mimeType = img.file.type;
-        
-        const promptText = `Analyze this image for microstock metadata (Shutterstock, Adobe Stock, etc.). 
-                Generate the following in JSON format:
-                - title: A catchy, descriptive title focusing on the main subject (minimum ${minTitleWords} words, maximum ${Math.max(20, minTitleWords + 5)} words).
-                - description: A detailed, SEO-friendly description including context, mood, and key elements (10-20 words).
-                - keywords: Exactly ${keywordCount} relevant keywords as an array of strings. Include specific details, broad categories, and conceptual terms. No duplicates.
-                - categories: Select exactly 2 most relevant categories from this list: [Abstract, Animals/Wildlife, Arts, Backgrounds/Textures, Beauty/Fashion, Buildings/Landmarks, Business/Finance, Celebrities, Education, Food and drink, Healthcare/Medical, Holidays, Industrial, Interiors, Miscellaneous, Nature, Objects, Parks/Outdoor, People, Religion, Science, Signs/Symbols, Sports/Recreation, Technology, Transportation, Vintage].
-                - adobeCategory: Select exactly 1 most relevant category from this list: [Animals, Buildings And Architecture, Business, Drinks, The Environment, States of Mind, Food, Graphic Resources, Hobbies and Leisure, Industry, Landscapes, Lifestyle, People, Plants and Flowers, Culture and Religion, Science, Social Issues, Sports, Technology, Transport, Travel].
-                
-                All metadata must be in English.`;
-        
-        const response = await ai.models.generateContent({
-          model: selectedModel,
-          contents: {
-            parts: [
-              { inlineData: { mimeType: mimeType, data: base64Data } },
-              { text: promptText },
-            ],
-          },
-          config: {
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                title: { type: Type.STRING },
-                description: { type: Type.STRING },
-                keywords: { 
-                  type: Type.ARRAY,
-                  items: { type: Type.STRING }
+      while (!success && retryCount < maxRetries) {
+        const currentKey = activeKeys[currentKeyIndex];
+        setActiveApiKey(currentKey);
+        const ai = new GoogleGenAI({ apiKey: currentKey });
+
+        try {
+          const base64Data = await fileToBase64(img.file);
+          let mimeType = img.file.type;
+          
+          const promptText = `Analyze this image for microstock metadata (Shutterstock, Adobe Stock, etc.). 
+                  Generate the following in JSON format:
+                  - title: A catchy, descriptive title focusing on the main subject (minimum ${minTitleWords} words, maximum ${Math.max(20, minTitleWords + 5)} words).
+                  - description: A detailed, SEO-friendly description including context, mood, and key elements (10-20 words).
+                  - keywords: Exactly ${keywordCount} relevant keywords as an array of strings. Include specific details, broad categories, and conceptual terms. No duplicates.
+                  - categories: Select exactly 2 most relevant categories from this list: [Abstract, Animals/Wildlife, Arts, Backgrounds/Textures, Beauty/Fashion, Buildings/Landmarks, Business/Finance, Celebrities, Education, Food and drink, Healthcare/Medical, Holidays, Industrial, Interiors, Miscellaneous, Nature, Objects, Parks/Outdoor, People, Religion, Science, Signs/Symbols, Sports/Recreation, Technology, Transportation, Vintage].
+                  - adobeCategory: Select exactly 1 most relevant category from this list: [Animals, Buildings And Architecture, Business, Drinks, The Environment, States of Mind, Food, Graphic Resources, Hobbies and Leisure, Industry, Landscapes, Lifestyle, People, Plants and Flowers, Culture and Religion, Science, Social Issues, Sports, Technology, Transport, Travel].
+                  
+                  All metadata must be in English.`;
+          
+          const response = await ai.models.generateContent({
+            model: currentModelId,
+            contents: {
+              parts: [
+                { inlineData: { mimeType: mimeType, data: base64Data } },
+                { text: promptText },
+              ],
+            },
+            config: {
+              responseMimeType: "application/json",
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  title: { type: Type.STRING },
+                  description: { type: Type.STRING },
+                  keywords: { 
+                    type: Type.ARRAY,
+                    items: { type: Type.STRING }
+                  },
+                  categories: {
+                    type: Type.ARRAY,
+                    items: { type: Type.STRING },
+                    description: "Exactly 2 categories from the provided list"
+                  },
+                  adobeCategory: {
+                    type: Type.STRING,
+                    description: "Exactly 1 category from the Adobe Stock list"
+                  }
                 },
-                categories: {
-                  type: Type.ARRAY,
-                  items: { type: Type.STRING },
-                  description: "Exactly 2 categories from the provided list"
-                },
-                adobeCategory: {
-                  type: Type.STRING,
-                  description: "Exactly 1 category from the Adobe Stock list"
-                }
-              },
-              required: ["title", "description", "keywords", "categories", "adobeCategory"]
+                required: ["title", "description", "keywords", "categories", "adobeCategory"]
+              }
             }
+          });
+
+          if (!response.text) {
+            throw new Error("Empty response from Gemini API");
           }
-        });
 
-        if (!response.text) {
-          throw new Error("Empty response from Gemini API");
-        }
+          const result = JSON.parse(response.text);
 
-        const result = JSON.parse(response.text);
+          const updatedMetadata = {
+            title: result.title,
+            description: result.description,
+            keywords: result.keywords.slice(0, 50),
+            categories: result.categories.slice(0, 2),
+            adobeCategory: result.adobeCategory,
+            prompt: promptText,
+            model: currentModelId,
+            usedModel: MODELS[modelIndex].name,
+            usedApiKey: currentKey.slice(-4)
+          };
 
-        const updatedMetadata = {
-          title: result.title,
-          description: result.description,
-          keywords: result.keywords.slice(0, 50),
-          categories: result.categories.slice(0, 2),
-          adobeCategory: result.adobeCategory,
-          prompt: promptText,
-          model: selectedModel
-        };
+          const updatedImage = { 
+            ...img, 
+            status: 'completed' as const, 
+            metadata: updatedMetadata 
+          };
 
-        const updatedImage = { 
-          ...img, 
-          status: 'completed' as const, 
-          metadata: updatedMetadata 
-        };
-
-        setImages(prev => prev.map(i => i.id === id ? updatedImage : i));
-        const processed = await processImage(updatedImage.file);
-        await saveToHistory(updatedImage, processed);
-        success = true;
-        setActiveApiKey(null);
-        addToast(`Berhasil regenerate: ${img.file.name}`, "success");
-      } catch (error) {
-        console.error(`Error with key ${currentKeyIndex}:`, error);
-        setErrorApiKeys(prev => [...new Set([...prev, activeKeys[currentKeyIndex]])]);
-        
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        if (errorMessage.includes("API_KEY_INVALID") || errorMessage.includes("403") || errorMessage.includes("401")) {
-          addToast(`API Key tidak valid: ${currentKey.substring(0, 8)}...`, "error");
-        } else {
-          addToast(`API Key error, mencoba key berikutnya...`, "info");
-        }
-        
-        currentKeyIndex = (currentKeyIndex + 1) % activeKeys.length;
-        retryCount++;
-        if (retryCount >= maxRetries) {
-          setImages(prev => prev.map(i => 
-            i.id === id ? { ...i, status: 'error', error: "Semua API Key gagal atau kuota habis" } : i
-          ));
-          addToast(`Gagal regenerate: ${img.file.name}`, "error");
+          setImages(prev => prev.map(i => i.id === id ? updatedImage : i));
+          const processed = await processImage(updatedImage.file);
+          await saveToHistory(updatedImage, processed);
+          success = true;
+          setActiveApiKey(null);
+          addToast(`Berhasil regenerate: ${img.file.name}`, "success");
+        } catch (error) {
+          console.error(`Error with key ${currentKeyIndex} on model ${currentModelId}:`, error);
+          const failedKey = activeKeys[currentKeyIndex];
+          setErrorApiKeys(prev => [...new Set([...prev, failedKey])]);
+          
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          if (errorMessage.includes("API_KEY_INVALID") || errorMessage.includes("403") || errorMessage.includes("401")) {
+            addToast(`API Key tidak valid: ${failedKey.substring(0, 8)}...`, "error");
+          } else {
+            addToast(`API Key error, mencoba key berikutnya...`, "info");
+          }
+          
+          currentKeyIndex = (currentKeyIndex + 1) % activeKeys.length;
+          retryCount++;
         }
       }
+
+      if (!success) {
+        // Rotate to next model
+        modelIndex = (modelIndex + 1) % MODELS.length;
+        modelsTried++;
+        if (modelsTried < totalModels) {
+          addToast(`Model ${currentModelId} limit, mencoba model ${MODELS[modelIndex].name}...`, "info");
+        }
+      }
+    }
+
+    if (!success) {
+      setImages(prev => prev.map(i => 
+        i.id === id ? { ...i, status: 'error', error: "Semua API Key dan Model gagal atau kuota habis" } : i
+      ));
+      addToast(`Gagal regenerate: ${img.file.name}`, "error");
     }
     setActiveApiKey(null);
   };
@@ -1518,6 +1563,20 @@ export default function App() {
                               ))}
                             </div>
                           )}
+                        </div>
+                        
+                        <div className="space-y-2 pt-4 border-t border-slate-100">
+                          <label className="text-[10px] uppercase tracking-[0.2em] text-slate-400 font-bold">Generation Details</label>
+                          <div className="flex flex-wrap gap-2">
+                            <div className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-50 border border-slate-100 rounded-lg">
+                              <Sparkles className="w-3 h-3 text-indigo-500" />
+                              <span className="text-[10px] font-bold text-slate-600">{selectedImage.metadata.usedModel}</span>
+                            </div>
+                            <div className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-50 border border-slate-100 rounded-lg">
+                              <Key className="w-3 h-3 text-indigo-500" />
+                              <span className="text-[10px] font-bold text-slate-600">••••{selectedImage.metadata.usedApiKey}</span>
+                            </div>
+                          </div>
                         </div>
                       </motion.div>
                     ) : selectedImage.status === 'processing' ? (
