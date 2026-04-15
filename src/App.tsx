@@ -78,6 +78,7 @@ interface Toast {
 }
 
 const MODELS = [
+  { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", description: "Model terbaru, sangat cepat & akurat" },
   { id: "gemini-3.1-flash-lite-preview", name: "Gemini 3.1 Flash Lite (Free Tier)", description: "Paling hemat kuota & cepat" },
   { id: "gemini-3-flash-preview", name: "Gemini 3 Flash (Free Tier)", description: "Keseimbangan kualitas & kecepatan" },
 ];
