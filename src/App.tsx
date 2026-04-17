@@ -24,7 +24,9 @@ import {
   Edit3,
   History,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  BarChart2,
+  Database
 } from 'lucide-react';
 import { GoogleGenAI, Type } from "@google/genai";
 import { cn } from './lib/utils';
@@ -146,9 +148,7 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (showHistoryModal) {
-      loadHistory();
-    }
+    loadHistory();
   }, [showHistoryModal]);
 
   const startEditing = () => {
@@ -181,6 +181,7 @@ export default function App() {
         setImages(prev => prev.map(img => img.id === selectedId ? newImage : img));
         const processed = await processImage(newImage.file);
         await saveToHistory(newImage, processed);
+        loadHistory();
       }
       
       setIsEditing(false);
@@ -460,6 +461,7 @@ export default function App() {
             setImages(prev => prev.map(i => i.id === img.id ? updatedImage : i));
             const processed = await processImage(updatedImage.file);
             await saveToHistory(updatedImage, processed);
+            loadHistory();
             success = true;
             setActiveApiKey(null);
             addToast(`Berhasil generate: ${img.file.name}`, "success");
@@ -620,6 +622,7 @@ export default function App() {
           setImages(prev => prev.map(i => i.id === id ? updatedImage : i));
           const processed = await processImage(updatedImage.file);
           await saveToHistory(updatedImage, processed);
+          loadHistory();
           success = true;
           setActiveApiKey(null);
           addToast(`Berhasil regenerate: ${img.file.name}`, "success");
@@ -961,6 +964,44 @@ export default function App() {
 
           <div className="flex-1 overflow-y-auto p-4 sm:p-8 custom-scrollbar">
             <div className="max-w-4xl mx-auto space-y-6">
+              
+              {/* Panel Statistik */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="bg-white/60 backdrop-blur-md rounded-2xl border border-slate-200 p-4 flex flex-col items-center justify-center text-center shadow-sm hover:border-indigo-300 transition-colors">
+                  <div className="w-10 h-10 rounded-full bg-indigo-50 flex items-center justify-center mb-2">
+                    <ImageIcon className="w-5 h-5 text-indigo-500" />
+                  </div>
+                  <h4 className="text-2xl font-bold text-slate-800">{images.length}</h4>
+                  <p className="text-[10px] uppercase tracking-wider text-slate-500 font-bold mt-1">Gambar Sesi Ini</p>
+                </div>
+                
+                <div className="bg-white/60 backdrop-blur-md rounded-2xl border border-slate-200 p-4 flex flex-col items-center justify-center text-center shadow-sm hover:border-emerald-300 transition-colors">
+                  <div className="w-10 h-10 rounded-full bg-emerald-50 flex items-center justify-center mb-2">
+                    <Database className="w-5 h-5 text-emerald-500" />
+                  </div>
+                  <h4 className="text-2xl font-bold text-slate-800">{historyItems.length}</h4>
+                  <p className="text-[10px] uppercase tracking-wider text-slate-500 font-bold mt-1">Total di Riwayat</p>
+                </div>
+
+                <div className="bg-white/60 backdrop-blur-md rounded-2xl border border-slate-200 p-4 flex flex-col items-center justify-center text-center shadow-sm hover:border-amber-300 transition-colors">
+                  <div className="w-10 h-10 rounded-full bg-amber-50 flex items-center justify-center mb-2">
+                    <Key className="w-5 h-5 text-amber-500" />
+                  </div>
+                  <h4 className="text-2xl font-bold text-slate-800">{apiKeys.length}</h4>
+                  <p className="text-[10px] uppercase tracking-wider text-slate-500 font-bold mt-1">API Key Tersedia</p>
+                </div>
+
+                <div className="bg-white/60 backdrop-blur-md rounded-2xl border border-slate-200 p-4 flex flex-col items-center justify-center text-center shadow-sm hover:border-purple-300 transition-colors">
+                  <div className="w-10 h-10 rounded-full bg-purple-50 flex items-center justify-center mb-2">
+                    <BarChart2 className="w-5 h-5 text-purple-500" />
+                  </div>
+                  <h4 className="text-xs font-bold text-slate-800 line-clamp-2 px-1 mt-1 mb-1 leading-tight h-8 flex items-center justify-center">
+                    {MODELS.find(m => m.id === selectedModel)?.name.split(' (')[0] || "Tidak Diketahui"}
+                  </h4>
+                  <p className="text-[10px] uppercase tracking-wider text-slate-500 font-bold mt-1">Model Aktif</p>
+                </div>
+              </div>
+
               {/* Persistent Upload Area at top (when images exist) */}
               {images.length > 0 && (
                 <div className="space-y-4">
