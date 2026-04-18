@@ -714,7 +714,7 @@ export default function App() {
     const imagesToExport = targetImages || images.filter(img => img.status === 'completed' && img.metadata);
     if (imagesToExport.length === 0) return;
 
-    const headers = ["Filename", "Title", "Keywords", "Category", "Releases"];
+    const headers = ["Filename", "Title", "Keywords", "Category"];
     const rows = imagesToExport.map(img => {
       // Change extension based on user selection
       const fileNameWithExt = img.file.name.replace(/\.[^/.]+$/, "") + exportExtension;
@@ -723,8 +723,7 @@ export default function App() {
         fileNameWithExt,
         `"${img.metadata!.title.replace(/"/g, '""')}"`,
         `"${img.metadata!.keywords.join(', ').replace(/"/g, '""')}"`,
-        `"${img.metadata!.adobeCategory || "Graphic Resources"}"`,
-        ""   // Releases
+        `"${img.metadata!.adobeCategory || "Graphic Resources"}"`
       ];
     });
 
