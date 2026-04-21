@@ -26,11 +26,12 @@ import {
   ChevronDown,
   ChevronUp,
   BarChart2,
-  Database
+  Database,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { GoogleGenAI, Type } from "@google/genai";
 import { cn } from './lib/utils';
-import { initDB, saveToHistory, getHistory, deleteFromHistory, clearHistory, cleanupOldHistory } from './lib/db';
 
 const CHANGELOG_DATA = [
   {
@@ -94,8 +95,8 @@ export default function App() {
   const [progress, setProgress] = useState(0);
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState(MODELS[0].id);
-  const [minTitleWords, setMinTitleWords] = useState(10);
   const [keywordCount, setKeywordCount] = useState(50);
+  const [titleLength, setTitleLength] = useState(20);
   const [exportExtension, setExportExtension] = useState<'.eps' | '.jpg' | '.png'>('.eps');
   const [exportScope, setExportScope] = useState<'all' | 'selected'>('all');
   const [activeDownloadMenu, setActiveDownloadMenu] = useState<{
@@ -115,11 +116,20 @@ export default function App() {
   });
   const [activeApiKey, setActiveApiKey] = useState<string | null>(null);
   const [errorApiKeys, setErrorApiKeys] = useState<string[]>([]);
+  const [visibleKeys, setVisibleKeys] = useState<Set<number>>(new Set());
+  const [copiedKeys, setCopiedKeys] = useState<Set<number>>(new Set());
   const [showKeyModal, setShowKeyModal] = useState(false);
+  const toggleKeyVisibility = (index: number) => {
+    setVisibleKeys(prev => {
+      const next = new Set(prev);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
+  };
   const [showInfoPage, setShowInfoPage] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [showHistoryModal, setShowHistoryModal] = useState(false);
-  const [historyItems, setHistoryItems] = useState<any[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
   const [confirmModal, setConfirmModal] = useState<{
     isOpen: boolean;
     title: string;
@@ -131,25 +141,21 @@ export default function App() {
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState<{ title: string; description: string; keywords: string } | null>(null);
   const [expandedLogs, setExpandedLogs] = useState<string[]>([CHANGELOG_DATA[0].id]);
+  const [showBulkOptions, setShowBulkOptions] = useState(false);
+  const [showSettingsPanel, setShowSettingsPanel] = useState(() => {
+    const saved = localStorage.getItem('show_settings_panel');
+    return saved ? JSON.parse(saved) : true;
+  });
 
   useEffect(() => {
-    cleanupOldHistory();
-  }, []);
+    localStorage.setItem('show_settings_panel', JSON.stringify(showSettingsPanel));
+  }, [showSettingsPanel]);
 
   const toggleLog = (id: string) => {
     setExpandedLogs(prev => 
       prev.includes(id) ? prev.filter(v => v !== id) : [...prev, id]
     );
   };
-
-  const loadHistory = async () => {
-    const items = await getHistory();
-    setHistoryItems(items);
-  };
-
-  useEffect(() => {
-    loadHistory();
-  }, [showHistoryModal]);
 
   const startEditing = () => {
     if (selectedImage?.metadata) {
@@ -179,9 +185,6 @@ export default function App() {
         };
         
         setImages(prev => prev.map(img => img.id === selectedId ? newImage : img));
-        const processed = await processImage(newImage.file);
-        await saveToHistory(newImage, processed);
-        loadHistory();
       }
       
       setIsEditing(false);
@@ -194,16 +197,6 @@ export default function App() {
     setIsEditing(false);
     setEditData(null);
   }, [selectedId]);
-
-  // Auto-start generation when new images are added
-  useEffect(() => {
-    if (autoProcess && images.length > 0 && !isGenerating) {
-      const hasPending = images.some(img => img.status === 'pending');
-      if (hasPending) {
-        generateMetadata();
-      }
-    }
-  }, [images.length, isGenerating, autoProcess]);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -238,17 +231,29 @@ export default function App() {
     setTimeout(() => setCopiedField(null), 2000);
   };
 
-  const onDrop = useCallback((acceptedFiles: File[]) => {
-    const newImages: ImageData[] = acceptedFiles.map(file => ({
-      id: Math.random().toString(36).substring(7),
-      file,
-      preview: URL.createObjectURL(file),
-      status: 'pending' as const,
-      isAiGenerated: false,
-    }));
-    setImages(prev => [...prev, ...newImages]);
-    if (!selectedId && newImages.length > 0) {
-      setSelectedId(newImages[0].id);
+  const onDrop = useCallback(async (acceptedFiles: File[]) => {
+    setIsUploading(true);
+    try {
+      const newImages: ImageData[] = [];
+      for (const file of acceptedFiles) {
+        // Compress image for preview to save memory
+        const base64Preview = await processImage(file);
+        newImages.push({
+          id: Math.random().toString(36).substring(7),
+          file,
+          preview: base64Preview,
+          status: 'pending' as const,
+          isAiGenerated: false,
+        });
+      }
+      setImages(prev => [...prev, ...newImages]);
+      if (!selectedId && newImages.length > 0) {
+        setSelectedId(newImages[0].id);
+      }
+    } catch (err) {
+      console.error("Error creating previews", err);
+    } finally {
+      setIsUploading(false);
     }
   }, [selectedId]);
 
@@ -302,45 +307,9 @@ export default function App() {
     });
   };
 
-  const removeHistoryItem = (id: string) => {
-    setConfirmModal({
-      isOpen: true,
-      title: 'Hapus Riwayat',
-      message: 'Apakah Anda yakin ingin menghapus item riwayat ini?',
-      onConfirm: async () => {
-        await deleteFromHistory(id);
-        loadHistory();
-      }
-    });
-  };
-
-  const handleClearHistory = () => {
-    setConfirmModal({
-      isOpen: true,
-      title: 'Hapus Semua Riwayat',
-      message: 'Apakah Anda yakin ingin menghapus semua riwayat?',
-      onConfirm: async () => {
-        await clearHistory();
-        loadHistory();
-      }
-    });
-  };
-
   const selectedImage = useMemo(() => 
     images.find(img => img.id === selectedId), 
   [images, selectedId]);
-
-  const fileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = () => {
-        const base64 = reader.result as string;
-        resolve(base64.split(',')[1]);
-      };
-      reader.onerror = error => reject(error);
-    });
-  };
 
   const generateMetadata = async () => {
     if (images.length === 0 || isGenerating) return;
@@ -384,12 +353,12 @@ export default function App() {
           const ai = new GoogleGenAI({ apiKey: currentKey });
 
           try {
-            const base64Data = await fileToBase64(img.file);
-            let mimeType = img.file.type;
+            const base64Data = img.preview.split(",")[1];
+            let mimeType = "image/jpeg";
             
             const promptText = `Analyze this image for microstock metadata (Shutterstock, Adobe Stock, etc.). 
                     Generate the following in JSON format:
-                    - title: A catchy, descriptive title focusing on the main subject (minimum ${minTitleWords} words, maximum ${Math.max(20, minTitleWords + 5)} words).
+                    - title: A catchy, descriptive title focusing on the main subject (approximately ${titleLength} characters long).
                     - description: A detailed, SEO-friendly description including context, mood, and key elements (10-20 words).
                     - keywords: Exactly ${keywordCount} relevant keywords as an array of strings. Include specific details, broad categories, and conceptual terms. No duplicates.
                     - categories: Select exactly 2 most relevant categories from this list: [Abstract, Animals/Wildlife, Arts, Backgrounds/Textures, Beauty/Fashion, Buildings/Landmarks, Business/Finance, Celebrities, Education, Food and drink, Healthcare/Medical, Holidays, Industrial, Interiors, Miscellaneous, Nature, Objects, Parks/Outdoor, People, Religion, Science, Signs/Symbols, Sports/Recreation, Technology, Transportation, Vintage].
@@ -459,9 +428,6 @@ export default function App() {
             };
 
             setImages(prev => prev.map(i => i.id === img.id ? updatedImage : i));
-            const processed = await processImage(updatedImage.file);
-            await saveToHistory(updatedImage, processed);
-            loadHistory();
             success = true;
             setActiveApiKey(null);
             addToast(`Berhasil generate: ${img.file.name}`, "success");
@@ -548,12 +514,12 @@ export default function App() {
         const ai = new GoogleGenAI({ apiKey: currentKey });
 
         try {
-          const base64Data = await fileToBase64(img.file);
-          let mimeType = img.file.type;
+          const base64Data = img.preview.split(",")[1];
+          let mimeType = "image/jpeg";
           
           const promptText = `Analyze this image for microstock metadata (Shutterstock, Adobe Stock, etc.). 
                   Generate the following in JSON format:
-                  - title: A catchy, descriptive title focusing on the main subject (minimum ${minTitleWords} words, maximum ${Math.max(20, minTitleWords + 5)} words).
+                  - title: A catchy, descriptive title focusing on the main subject (approximately ${titleLength} characters long).
                   - description: A detailed, SEO-friendly description including context, mood, and key elements (10-20 words).
                   - keywords: Exactly ${keywordCount} relevant keywords as an array of strings. Include specific details, broad categories, and conceptual terms. No duplicates.
                   - categories: Select exactly 2 most relevant categories from this list: [Abstract, Animals/Wildlife, Arts, Backgrounds/Textures, Beauty/Fashion, Buildings/Landmarks, Business/Finance, Celebrities, Education, Food and drink, Healthcare/Medical, Holidays, Industrial, Interiors, Miscellaneous, Nature, Objects, Parks/Outdoor, People, Religion, Science, Signs/Symbols, Sports/Recreation, Technology, Transportation, Vintage].
@@ -620,9 +586,6 @@ export default function App() {
           };
 
           setImages(prev => prev.map(i => i.id === id ? updatedImage : i));
-          const processed = await processImage(updatedImage.file);
-          await saveToHistory(updatedImage, processed);
-          loadHistory();
           success = true;
           setActiveApiKey(null);
           addToast(`Berhasil regenerate: ${img.file.name}`, "success");
@@ -714,7 +677,7 @@ export default function App() {
     const imagesToExport = targetImages || images.filter(img => img.status === 'completed' && img.metadata);
     if (imagesToExport.length === 0) return;
 
-    const headers = ["Filename", "Title", "Keywords", "Category", "Releases"];
+    const headers = ["Filename", "Title", "Keywords"];
     const rows = imagesToExport.map(img => {
       // Change extension based on user selection
       const fileNameWithExt = img.file.name.replace(/\.[^/.]+$/, "") + exportExtension;
@@ -722,9 +685,7 @@ export default function App() {
       return [
         fileNameWithExt,
         `"${img.metadata!.title.replace(/"/g, '""')}"`,
-        `"${img.metadata!.keywords.join(', ').replace(/"/g, '""')}"`,
-        `"${img.metadata!.adobeCategory || "Graphic Resources"}"`,
-        "No"
+        `"${img.metadata!.keywords.join(', ').replace(/"/g, '""')}"`
       ];
     });
 
@@ -807,7 +768,8 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-700 font-sans selection:bg-indigo-100 overflow-hidden relative">
+    <>
+      <div className="min-h-screen bg-slate-50 text-slate-700 font-sans selection:bg-indigo-100 overflow-hidden relative">
       {/* Background blobs */}
       <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-indigo-200/40 blur-[120px] rounded-full pointer-events-none" />
       <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-purple-200/40 blur-[120px] rounded-full pointer-events-none" />
@@ -822,7 +784,7 @@ export default function App() {
           
           {/* Drag & Drop Overlay */}
           <AnimatePresence>
-            {isDragActive && (
+            {isDragActive && !isUploading && (
               <motion.div 
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
@@ -838,6 +800,20 @@ export default function App() {
                 </div>
               </motion.div>
             )}
+            {isUploading && (
+              <motion.div 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="absolute inset-0 z-50 bg-indigo-600/20 backdrop-blur-[4px] flex items-center justify-center p-8"
+              >
+                <div className="bg-white/90 p-8 rounded-3xl shadow-2xl flex flex-col items-center max-w-sm w-full text-center">
+                  <Loader2 className="w-12 h-12 text-indigo-500 animate-spin mb-4" />
+                  <h3 className="text-xl font-bold text-slate-800">Menyiapkan Gambar...</h3>
+                  <p className="text-sm text-slate-500 mt-2">Mengecilkan ukuran gambar agar web tidak berat.</p>
+                </div>
+              </motion.div>
+            )}
           </AnimatePresence>
 
           {/* Main Header (Responsive) */}
@@ -849,7 +825,7 @@ export default function App() {
               </h1>
               <div className="h-4 w-px bg-slate-200 hidden xs:block" />
               <h2 className="text-xs md:text-sm font-medium text-slate-500 truncate max-w-[120px] sm:max-w-[200px]">
-                {selectedImage ? selectedImage.file.name : "Metadata Generator"}
+                Metadata Generator
               </h2>
             </div>
             
@@ -912,13 +888,6 @@ export default function App() {
                 )}
               </button>
               <button 
-                onClick={() => setShowHistoryModal(true)}
-                className="p-2 hover:bg-slate-100 rounded-xl text-slate-500 transition-colors"
-                title="Riwayat Generate"
-              >
-                <History className="w-4 h-4" />
-              </button>
-              <button 
                 onClick={() => setShowInfoPage(true)}
                 className="p-2 hover:bg-slate-100 rounded-xl text-slate-500 transition-colors"
                 title="Informasi Website"
@@ -963,374 +932,255 @@ export default function App() {
           </AnimatePresence>
 
           <div className="flex-1 overflow-y-auto p-4 sm:p-8 custom-scrollbar">
-            <div className="max-w-4xl mx-auto space-y-6">
+            <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-8 max-w-[1600px] mx-auto">
               
-              {/* Panel Statistik */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="bg-white/60 backdrop-blur-md rounded-2xl border border-slate-200 p-4 flex flex-col items-center justify-center text-center shadow-sm hover:border-indigo-300 transition-colors">
-                  <div className="w-10 h-10 rounded-full bg-indigo-50 flex items-center justify-center mb-2">
-                    <ImageIcon className="w-5 h-5 text-indigo-500" />
+              {/* Left Column: Input and List */}
+              <div className="space-y-6">
+                {/* Persistent Upload Area */}
+                <div 
+                  onClick={open}
+                  className={cn(
+                    "p-6 border-2 border-dashed rounded-3xl transition-all cursor-pointer group flex flex-col items-center justify-center text-center",
+                    isDragActive 
+                      ? "border-indigo-400 bg-indigo-50/50" 
+                      : "border-slate-200 bg-white/40 hover:bg-white/60 hover:border-slate-300"
+                  )}
+                >
+                  <div className="w-10 h-10 rounded-2xl bg-indigo-50 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
+                    <Upload className="w-5 h-5 text-indigo-500" />
                   </div>
-                  <h4 className="text-2xl font-bold text-slate-800">{images.length}</h4>
-                  <p className="text-[10px] uppercase tracking-wider text-slate-500 font-bold mt-1">Gambar Sesi Ini</p>
-                </div>
-                
-                <div className="bg-white/60 backdrop-blur-md rounded-2xl border border-slate-200 p-4 flex flex-col items-center justify-center text-center shadow-sm hover:border-emerald-300 transition-colors">
-                  <div className="w-10 h-10 rounded-full bg-emerald-50 flex items-center justify-center mb-2">
-                    <Database className="w-5 h-5 text-emerald-500" />
-                  </div>
-                  <h4 className="text-2xl font-bold text-slate-800">{historyItems.length}</h4>
-                  <p className="text-[10px] uppercase tracking-wider text-slate-500 font-bold mt-1">Total di Riwayat</p>
-                </div>
-
-                <div className="bg-white/60 backdrop-blur-md rounded-2xl border border-slate-200 p-4 flex flex-col items-center justify-center text-center shadow-sm hover:border-amber-300 transition-colors">
-                  <div className="w-10 h-10 rounded-full bg-amber-50 flex items-center justify-center mb-2">
-                    <Key className="w-5 h-5 text-amber-500" />
-                  </div>
-                  <h4 className="text-2xl font-bold text-slate-800">{apiKeys.length}</h4>
-                  <p className="text-[10px] uppercase tracking-wider text-slate-500 font-bold mt-1">API Key Tersedia</p>
+                  <h4 className="text-sm font-bold text-slate-800">Tambahkan Gambar</h4>
+                  <p className="text-[10px] text-slate-500 mt-0.5">Seret atau klik untuk upload</p>
                 </div>
 
-                <div className="bg-white/60 backdrop-blur-md rounded-2xl border border-slate-200 p-4 flex flex-col items-center justify-center text-center shadow-sm hover:border-purple-300 transition-colors">
-                  <div className="w-10 h-10 rounded-full bg-purple-50 flex items-center justify-center mb-2">
-                    <BarChart2 className="w-5 h-5 text-purple-500" />
-                  </div>
-                  <h4 className="text-xs font-bold text-slate-800 line-clamp-2 px-1 mt-1 mb-1 leading-tight h-8 flex items-center justify-center">
-                    {MODELS.find(m => m.id === selectedModel)?.name.split(' (')[0] || "Tidak Diketahui"}
-                  </h4>
-                  <p className="text-[10px] uppercase tracking-wider text-slate-500 font-bold mt-1">Model Aktif</p>
-                </div>
-              </div>
+                {/* Grid Image Gallery */}
+                {images.length > 0 && (
+                  <div className="bg-white/40 backdrop-blur-md rounded-3xl border border-slate-200 p-4 sm:p-6 space-y-4">
+                    {/* Bulk Download Header */}
+                    {images.length > 0 && images.every(img => img.status === 'completed') && (
+                      <div className="bg-white/40 backdrop-blur-md rounded-2xl border border-slate-200 p-3 shadow-sm">
+                        <button 
+                          onClick={() => setShowBulkOptions(!showBulkOptions)}
+                          className="flex items-center justify-between w-full text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]"
+                        >
+                          Bulk Download Export
+                          {showBulkOptions ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                        </button>
+                        
+                        {showBulkOptions && (
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <div className="flex gap-1 w-full">
+                              {(['.eps', '.jpg', '.png'] as const).map((ext) => (
+                                <button
+                                  key={ext}
+                                  onClick={() => setExportExtension(ext)}
+                                  className={cn(
+                                    "flex-1 py-1.5 rounded-lg text-[10px] font-bold transition-all border",
+                                    exportExtension === ext
+                                      ? "bg-indigo-50 border-indigo-200 text-indigo-700"
+                                      : "bg-slate-50 border-slate-100 text-slate-400 hover:bg-slate-100"
+                                  )}
+                                >
+                                  {ext}
+                                </button>
+                              ))}
+                            </div>
 
-              {/* Persistent Upload Area at top (when images exist) */}
-              {images.length > 0 && (
-                <div className="space-y-4">
-                  <div 
-                    onClick={open}
-                    className={cn(
-                      "p-6 border-2 border-dashed rounded-3xl transition-all cursor-pointer group flex flex-col items-center justify-center text-center",
-                      isDragActive 
-                        ? "border-indigo-400 bg-indigo-50/50" 
-                        : "border-slate-200 bg-white/20 hover:bg-white/40 hover:border-slate-300"
-                    )}
-                  >
-                    <div className="w-10 h-10 rounded-2xl bg-indigo-50 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
-                      <Upload className="w-5 h-5 text-indigo-500" />
-                    </div>
-                    <h4 className="text-sm font-bold text-slate-800">Tambah Gambar Lagi</h4>
-                    <p className="text-[10px] text-slate-500 mt-0.5">Seret gambar ke sini atau klik untuk upload</p>
-                    <p className="text-[9px] text-indigo-400 mt-1 font-medium">Upload hanya support file JPG, PNG atau SVG. Tetapi file di Microstock Wajib Format .EPS agar metadata berjalan.</p>
-                  </div>
-
-                  {/* Grid Image Gallery with Pagination */}
-                  <div className="bg-white/40 backdrop-blur-md rounded-3xl border border-slate-200 p-4 sm:p-6">
-                    <div className="flex items-center justify-between mb-4 px-1">
-                      <div className="flex items-center gap-2">
-                        <h3 className="text-xs font-bold text-slate-600 uppercase tracking-wider">Daftar Gambar ({images.length})</h3>
+                            <button onClick={() => downloadCSV()} className="flex-1 py-1.5 bg-white border border-indigo-200 text-indigo-600 rounded-lg text-[10px] font-bold hover:bg-indigo-50 shadow-sm transition-all flex items-center justify-center gap-1.5">
+                              <Download className="w-3 h-3" /> Freepik
+                            </button>
+                            <button onClick={() => downloadAdobeStockCSV()} className="flex-1 py-1.5 bg-white border border-indigo-200 text-indigo-600 rounded-lg text-[10px] font-bold hover:bg-indigo-50 shadow-sm transition-all flex items-center justify-center gap-1.5">
+                              <Download className="w-3 h-3" /> Adobe
+                            </button>
+                            <button onClick={() => downloadShutterstockCSV()} className="flex-1 py-1.5 bg-white border border-indigo-200 text-indigo-600 rounded-lg text-[10px] font-bold hover:bg-indigo-50 shadow-sm transition-all flex items-center justify-center gap-1.5">
+                              <Download className="w-3 h-3" /> Shutterstock
+                            </button>
+                          </div>
+                        )}
                       </div>
-                      <p className="text-[10px] text-slate-400 hidden sm:block">Pilih gambar untuk melihat detail</p>
-                    </div>
+                    )}
+                    
+                    {/* Bulk Download Header */}
+                    {images.length > 0 && images.every(img => img.status === 'completed') && (
+                      <div className="bg-white/40 backdrop-blur-md rounded-2xl border border-slate-200 p-3 shadow-sm">
+                        <button 
+                          onClick={() => setShowBulkOptions(!showBulkOptions)}
+                          className="flex items-center justify-between w-full text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]"
+                        >
+                          Bulk Download Export
+                          {showBulkOptions ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                        </button>
+                        
+                        {showBulkOptions && (
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <div className="flex gap-1 w-full">
+                              {(['.eps', '.jpg', '.png'] as const).map((ext) => (
+                                <button
+                                  key={ext}
+                                  onClick={() => setExportExtension(ext)}
+                                  className={cn(
+                                    "flex-1 py-1.5 rounded-lg text-[10px] font-bold transition-all border",
+                                    exportExtension === ext
+                                      ? "bg-indigo-50 border-indigo-200 text-indigo-700"
+                                      : "bg-slate-50 border-slate-100 text-slate-400 hover:bg-slate-100"
+                                  )}
+                                >
+                                  {ext}
+                                </button>
+                              ))}
+                            </div>
 
-                    <div className="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3">
+                            <button onClick={() => downloadCSV()} className="flex-1 py-1.5 bg-white border border-indigo-200 text-indigo-600 rounded-lg text-[10px] font-bold hover:bg-indigo-50 shadow-sm transition-all flex items-center justify-center gap-1.5">
+                              <Download className="w-3 h-3" /> Freepik
+                            </button>
+                            <button onClick={() => downloadAdobeStockCSV()} className="flex-1 py-1.5 bg-white border border-indigo-200 text-indigo-600 rounded-lg text-[10px] font-bold hover:bg-indigo-50 shadow-sm transition-all flex items-center justify-center gap-1.5">
+                              <Download className="w-3 h-3" /> Adobe
+                            </button>
+                            <button onClick={() => downloadShutterstockCSV()} className="flex-1 py-1.5 bg-white border border-indigo-200 text-indigo-600 rounded-lg text-[10px] font-bold hover:bg-indigo-50 shadow-sm transition-all flex items-center justify-center gap-1.5">
+                              <Download className="w-3 h-3" /> Shutterstock
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    
+                    <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">Daftar Gambar ({images.length})</h3>
+                    <div className="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-4 xl:grid-cols-5 gap-2.5">
                       {images.map((img) => (
                         <div
                           key={img.id}
                           className={cn(
-                            "group relative aspect-square rounded-2xl overflow-hidden border-2 transition-all cursor-pointer",
-                            selectedId === img.id 
-                              ? "border-indigo-500 ring-4 ring-indigo-50 shadow-lg scale-105 z-10" 
-                              : "border-transparent hover:border-slate-300 bg-white/50"
+                            "group relative aspect-square rounded-xl overflow-hidden border-2 transition-all cursor-pointer shadow-sm",
+                            selectedId === img.id ? "border-indigo-500 ring-4 ring-indigo-50 scale-105 z-10" : "border-white bg-white/50 hover:border-indigo-200"
                           )}
                           onClick={() => setSelectedId(img.id)}
                         >
                           {img.file.type.startsWith('image/') ? (
-                            <img 
-                              src={img.preview} 
-                              alt="" 
-                              className="w-full h-full object-cover"
-                              referrerPolicy="no-referrer"
-                            />
+                            <img src={img.preview} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                           ) : (
-                            <div className="w-full h-full bg-slate-100 flex flex-col items-center justify-center p-2 text-slate-400">
-                              <FileText className="w-8 h-8 mb-1" />
-                              <span className="text-[8px] font-bold uppercase truncate w-full text-center">
-                                {img.file.name.split('.').pop()}
-                              </span>
+                            <div className="w-full h-full bg-slate-50 flex items-center justify-center text-slate-300">
+                              <FileText className="w-5 h-5" />
                             </div>
                           )}
                           
-                          {/* Status Indicators */}
-                          {img.status === 'completed' && (
-                            <div className="absolute top-1 right-1 bg-green-500 text-white rounded-full p-0.5 shadow-sm z-20">
-                              <Check className="w-2.5 h-2.5" />
-                            </div>
-                          )}
-                          {img.status === 'processing' && (
-                            <div className="absolute inset-0 bg-black/40 flex items-center justify-center z-20">
-                              <Loader2 className="w-5 h-5 text-white animate-spin" />
-                            </div>
-                          )}
-                          {img.status === 'error' && (
-                            <div className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-0.5 shadow-sm z-20">
-                              <AlertCircle className="w-2.5 h-2.5" />
-                            </div>
-                          )}
+                          {/* Delete Button */}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setImages(prev => prev.filter(i => i.id !== img.id));
+                              if (selectedId === img.id) setSelectedId(null);
+                            }}
+                            className="absolute top-1 right-1 p-1 bg-white/90 rounded-full shadow-sm text-slate-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity z-20"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
 
-                          {/* Hover Actions */}
-                          <div className="absolute inset-0 bg-indigo-900/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 z-30">
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                regenerateSingleMetadata(img.id);
-                              }}
-                              disabled={isGenerating || img.status === 'processing'}
-                              className="p-1.5 bg-white text-indigo-600 rounded-lg hover:bg-indigo-50 transition-colors shadow-sm"
-                              title="Generate Metadata"
-                            >
-                              <Sparkles className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                removeImage(img.id);
-                              }}
-                              className="p-1.5 bg-white text-red-500 rounded-lg hover:bg-red-50 transition-colors shadow-sm"
-                              title="Hapus Gambar"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+                          {/* Status Overlay */}
+                          <div className="absolute inset-x-0 bottom-0 p-1 flex justify-end pointer-events-none">
+                            {img.status === 'completed' && (
+                              <div className="w-4 h-4 bg-green-500 rounded-full flex items-center justify-center shadow-lg border-2 border-white">
+                                <Check className="w-2.5 h-2.5 text-white" />
+                              </div>
+                            )}
+                            {img.status === 'processing' && (
+                              <div className="w-4 h-4 bg-indigo-500 rounded-full flex items-center justify-center shadow-lg border-2 border-white animate-pulse">
+                                <Loader2 className="w-2.5 h-2.5 text-white animate-spin" />
+                              </div>
+                            )}
+                            {img.status === 'error' && (
+                              <div className="w-4 h-4 bg-red-500 rounded-full flex items-center justify-center shadow-lg border-2 border-white">
+                                <AlertCircle className="w-2.5 h-2.5 text-white" />
+                              </div>
+                            )}
                           </div>
+
+                          {/* Hover effect */}
+                          <div className={cn(
+                            "absolute inset-0 bg-indigo-600/10 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center",
+                            selectedId === img.id && "opacity-100"
+                          )} />
                         </div>
                       ))}
                     </div>
 
-                    {/* AI Settings above Generate All */}
-                    <div className="mt-8 pt-6 border-t border-slate-100">
+                    <div className="space-y-4 pt-4 border-t border-slate-100">
                       <button 
-                        onClick={() => setShowSettings(!showSettings)}
-                        className="flex items-center gap-2 text-xs font-bold text-slate-500 hover:text-indigo-600 transition-colors mb-4"
+                        onClick={() => setShowSettingsPanel(!showSettingsPanel)}
+                        className="flex items-center justify-between w-full text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]"
                       >
-                        {showSettings ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                        Pengaturan AI
-                      </button>
-                      
-                      {showSettings && (
-                        <div className="space-y-6">
-                          <div className="flex flex-col sm:flex-row gap-6 sm:gap-12">
-                            <div className="flex-1 space-y-3">
-                              <div className="flex justify-between items-center">
-                                <label className="text-[10px] uppercase tracking-wider font-bold text-slate-500">Minimal Kata Judul</label>
-                                <span className="text-xs font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md">{minTitleWords} kata</span>
-                              </div>
-                              <input 
-                                type="range" 
-                                min="5" 
-                                max="20" 
-                                value={minTitleWords} 
-                                onChange={(e) => setMinTitleWords(parseInt(e.target.value))}
-                                className="w-full h-1.5 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-indigo-600"
-                              />
-                            </div>
-                            <div className="flex-1 space-y-3">
-                              <div className="flex justify-between items-center">
-                                <label className="text-[10px] uppercase tracking-wider font-bold text-slate-500">Jumlah Kata Kunci</label>
-                                <span className="text-xs font-bold text-purple-600 bg-purple-50 px-2 py-0.5 rounded-md">{keywordCount} keywords</span>
-                              </div>
-                              <input 
-                                type="range" 
-                                min="10" 
-                                max="50" 
-                                value={keywordCount} 
-                                onChange={(e) => setKeywordCount(parseInt(e.target.value))}
-                                className="w-full h-1.5 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-purple-600"
-                              />
-                            </div>
-                          </div>
-                          
-                          <div className="mt-6 flex items-center justify-center gap-4">
-                            <label className="flex items-center gap-2 cursor-pointer group">
-                              <div className="relative">
-                                <input 
-                                  type="checkbox" 
-                                  className="sr-only" 
-                                  checked={autoProcess}
-                                  onChange={(e) => setAutoProcess(e.target.checked)}
-                                />
-                                <div className={cn(
-                                  "w-10 h-5 rounded-full transition-colors",
-                                  autoProcess ? "bg-indigo-500" : "bg-slate-200"
-                                )} />
-                                <div className={cn(
-                                  "absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform shadow-sm",
-                                  autoProcess ? "translate-x-5" : "translate-x-0"
-                                )} />
-                              </div>
-                              <span className="text-xs font-bold text-slate-600 group-hover:text-indigo-600 transition-colors">Auto Process</span>
-                            </label>
-                          </div>
-                        </div>
-                      )}
-
-                      <p className="text-[9px] text-slate-400 mt-4 italic text-center">
-                        * Pengaturan ini akan diterapkan pada proses generate berikutnya.
-                      </p>
-                    </div>
-
-                    {/* Generate All Button below list */}
-                    <div className="mt-6 flex flex-col items-center gap-4">
-                      <button
-                        onClick={generateMetadata}
-                        disabled={isGenerating || !images.some(img => img.status === 'pending' || img.status === 'error')}
-                        className={cn(
-                          "px-8 py-3 rounded-2xl text-sm font-bold flex items-center gap-3 transition-all shadow-xl",
-                          apiKeys.length === 0
-                            ? "bg-slate-200 text-slate-500 opacity-60 hover:opacity-80"
-                            : isGenerating 
-                              ? "bg-slate-100 text-slate-400 cursor-not-allowed"
-                              : "bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-200 active:scale-95"
-                        )}
-                      >
-                        {isGenerating ? (
-                          <Loader2 className="w-5 h-5 animate-spin" />
-                        ) : (
-                          <Sparkles className="w-5 h-5" />
-                        )}
-                        Generate Semua Metadata ({images.filter(img => img.status !== 'completed').length})
+                        Metadata Settings
+                        {showSettingsPanel ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                       </button>
 
-                      {/* Download All CSV Options below Generate All */}
-                      {images.some(img => img.status === 'completed') && (
-                        <div className="flex flex-col items-center justify-center gap-2 mt-4" ref={dropdownRef}>
-                          <AnimatePresence mode="wait">
-                            {activeDownloadMenu && !activeDownloadMenu.targetImages ? (
-                              <motion.div
-                                key="download-menu"
-                                initial={{ opacity: 0, y: -10 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                exit={{ opacity: 0, y: -10 }}
-                                className="w-full max-w-md p-4 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col gap-4"
-                              >
-                                <div className="flex items-center justify-between">
-                                  <span className="text-sm font-bold text-slate-700">
-                                    Format File ({activeDownloadMenu.type === 'adobe' ? 'Adobe Stock' : 'Shutterstock'})
-                                  </span>
-                                  <button onClick={() => setActiveDownloadMenu(null)} className="p-1.5 text-slate-400 hover:bg-slate-100 rounded-lg transition-colors">
-                                    <X className="w-4 h-4" />
-                                  </button>
-                                </div>
-                                <div className="flex gap-2">
-                                  {(['.eps', '.jpg', '.png'] as const).map((ext) => (
-                                    <button
-                                      key={ext}
-                                      onClick={() => setExportExtension(ext)}
-                                      className={cn(
-                                        "flex-1 py-2.5 rounded-xl text-sm font-bold transition-all border",
-                                        exportExtension === ext
-                                          ? "bg-indigo-50 border-indigo-200 text-indigo-700 shadow-inner"
-                                          : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
-                                      )}
-                                    >
-                                      {ext}
-                                    </button>
-                                  ))}
-                                </div>
-                                <button
-                                  onClick={() => {
-                                    if (activeDownloadMenu.type === 'adobe') downloadAdobeStockCSV(activeDownloadMenu.targetImages);
-                                    else downloadShutterstockCSV(activeDownloadMenu.targetImages);
-                                    setActiveDownloadMenu(null);
-                                  }}
-                                  className="w-full py-3 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 transition-all flex items-center justify-center gap-2 shadow-sm"
-                                >
-                                  <Download className="w-4 h-4" />
-                                  Lanjutkan Download
-                                </button>
-                              </motion.div>
-                            ) : (
-                              <motion.div 
-                                key="download-buttons"
-                                initial={{ opacity: 0 }}
-                                animate={{ opacity: 1 }}
-                                exit={{ opacity: 0 }}
-                                className="flex flex-col items-center gap-3"
-                              >
-                                {selectedId && images.find(img => img.id === selectedId)?.status === 'completed' && (
-                                  <div className="flex bg-slate-100 p-1 rounded-xl">
-                                    <button
-                                      onClick={() => setExportScope('all')}
-                                      className={cn(
-                                        "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
-                                        exportScope === 'all' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
-                                      )}
-                                    >
-                                      Semua Gambar
-                                    </button>
-                                    <button
-                                      onClick={() => setExportScope('selected')}
-                                      className={cn(
-                                        "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
-                                        exportScope === 'selected' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
-                                      )}
-                                    >
-                                      Gambar Terpilih Saja
-                                    </button>
-                                  </div>
-                                )}
-                                <div className="flex flex-wrap items-center justify-center gap-2">
-                                  <button
-                                    onClick={() => downloadCSV(exportScope === 'selected' && selectedId ? [images.find(img => img.id === selectedId)!] : undefined)}
-                                    className="px-4 py-2 bg-white hover:bg-slate-50 border border-slate-200 text-indigo-600 rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-sm active:scale-95"
-                                    title="Download Freepik CSV"
-                                  >
-                                    <Download className="w-4 h-4" />
-                                    Freepik
-                                  </button>
-                                  <button
-                                    onClick={() => setActiveDownloadMenu({ type: 'adobe', targetImages: exportScope === 'selected' && selectedId ? [images.find(img => img.id === selectedId)!] : undefined })}
-                                    className="px-4 py-2 bg-white hover:bg-slate-50 border border-slate-200 text-indigo-600 rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-sm active:scale-95"
-                                    title="Download Adobe Stock CSV"
-                                  >
-                                    <Download className="w-4 h-4" />
-                                    Adobe Stock
-                                  </button>
-                                  <button
-                                    onClick={() => setActiveDownloadMenu({ type: 'shutterstock', targetImages: exportScope === 'selected' && selectedId ? [images.find(img => img.id === selectedId)!] : undefined })}
-                                    className="px-4 py-2 bg-white hover:bg-slate-50 border border-slate-200 text-indigo-600 rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-sm active:scale-95"
-                                    title="Download Shutterstock CSV"
-                                  >
-                                    <Download className="w-4 h-4" />
-                                    Shutterstock
-                                  </button>
-                                </div>
-                              </motion.div>
-                            )}
-                          </AnimatePresence>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {selectedImage ? (
-                <div className="space-y-6">
-                  {/* Selected Image Header with Small Preview */}
-                    <div className="flex flex-col sm:flex-row sm:items-center gap-4 p-4 bg-white/40 backdrop-blur-md rounded-2xl border border-slate-200">
-                      <div className="flex items-center gap-4 flex-1 min-w-0">
-                        <div className="w-16 h-16 rounded-xl overflow-hidden border border-slate-200 bg-white shadow-sm flex-shrink-0 flex items-center justify-center">
-                          {selectedImage.file.type.startsWith('image/') ? (
-                            <img 
-                              src={selectedImage.preview} 
-                              alt="" 
-                              className="w-full h-full object-cover"
-                              referrerPolicy="no-referrer"
+                      {showSettingsPanel && (
+                        <>
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between">
+                              <label className="text-xs font-bold text-slate-600">Title Length ({titleLength})</label>
+                              <button onClick={() => setTitleLength(20)} className="text-[10px] text-indigo-500 hover:text-indigo-700 font-bold">Reset</button>
+                            </div>
+                            <input 
+                              type="range"
+                              min="5"
+                              max="100"
+                              value={titleLength}
+                              onChange={(e) => setTitleLength(parseInt(e.target.value))}
+                              className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
                             />
+                          </div>
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between">
+                              <label className="text-xs font-bold text-slate-600">Keywords Count ({keywordCount})</label>
+                              <button onClick={() => setKeywordCount(50)} className="text-[10px] text-indigo-500 hover:text-indigo-700 font-bold">Reset</button>
+                            </div>
+                            <input 
+                              type="range"
+                              min="5"
+                              max="100"
+                              value={keywordCount}
+                              onChange={(e) => setKeywordCount(parseInt(e.target.value))}
+                              className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                            />
+                          </div>
+                        </>
+                      )}
+                    </div>
+
+                    <button 
+                      onClick={generateMetadata}
+                      disabled={isGenerating || images.length === 0}
+                      className="w-full py-3 bg-indigo-600 text-white rounded-xl text-sm font-bold shadow-lg shadow-indigo-100 flex items-center justify-center gap-2 hover:bg-indigo-700 disabled:opacity-50 transition-all active:scale-[.98]"
+                    >
+                      {isGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                      {isGenerating ? "Sedang..." : "Generate"}
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Right Column: AI Generation and Detailed View */}
+              <div className="space-y-6">
+                {/* Result/Detail Area */}
+                {selectedImage ? (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="bg-white/40 backdrop-blur-md rounded-3xl border border-slate-200 p-4 shadow-sm overflow-hidden"
+                  >
+                    {/* Metadata Header */}
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-4">
+                        <div className="w-16 h-16 rounded-2xl overflow-hidden border border-slate-200 shadow-sm bg-white">
+                          {selectedImage.file.type.startsWith('image/') ? (
+                            <img src={selectedImage.preview} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                           ) : (
-                            <FileText className="w-8 h-8 text-slate-400" />
+                            <div className="w-full h-full flex items-center justify-center text-slate-400 bg-slate-50">
+                              <FileText className="w-8 h-8" />
+                            </div>
                           )}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <h3 className="text-sm font-bold text-slate-800 truncate">{selectedImage.file.name}</h3>
+                          <h2 className="text-lg font-bold text-slate-800 line-clamp-1">{selectedImage.file.name}</h2>
                           <div className="flex items-center gap-3 mt-1">
                             <span className={cn(
                               "text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider",
@@ -1338,10 +1188,9 @@ export default function App() {
                               selectedImage.status === 'error' ? "bg-red-100 text-red-600" :
                               "bg-indigo-100 text-indigo-600"
                             )}>
-                              {selectedImage.status}
+                              {selectedId === 'completed' ? 'Selesai' : selectedImage.status}
                             </span>
                             
-                            {/* AI Generated Toggle */}
                             <label className="flex items-center gap-1.5 cursor-pointer group">
                               <div className="relative">
                                 <input 
@@ -1357,7 +1206,7 @@ export default function App() {
                                 />
                                 <div className={cn(
                                   "w-7 h-4 rounded-full transition-colors",
-                                  selectedImage.isAiGenerated ? "bg-indigo-500" : "bg-slate-200"
+                                  selectedImage.isAiGenerated ? "bg-indigo-500" : "bg-slate-300"
                                 )} />
                                 <div className={cn(
                                   "absolute top-0.5 left-0.5 w-3 h-3 bg-white rounded-full transition-transform shadow-sm",
@@ -1369,337 +1218,221 @@ export default function App() {
                           </div>
                         </div>
                       </div>
-                      <div className="flex items-center gap-2 justify-end">
+                      
+                      <div className="flex gap-2">
                         {selectedImage.status !== 'processing' && (
-                          <>
-                            <button
-                              onClick={() => regenerateSingleMetadata(selectedImage.id)}
-                              disabled={isGenerating}
-                              className={cn(
-                                "p-2.5 border rounded-xl transition-all flex items-center gap-2 text-xs font-bold shadow-sm",
-                                apiKeys.length === 0
-                                  ? "bg-slate-100 border-slate-200 text-slate-400 opacity-60 hover:opacity-80"
-                                  : selectedImage.status === 'completed' 
-                                    ? "bg-white hover:bg-indigo-50 border-slate-200 text-indigo-600"
-                                    : "bg-indigo-600 hover:bg-indigo-700 border-indigo-500 text-white"
-                              )}
-                              title={selectedImage.status === 'completed' ? "Regenerate metadata" : "Generate metadata"}
-                            >
-                              <Sparkles className="w-4 h-4" />
-                              {selectedImage.status === 'completed' ? "Regenerate" : "Generate"}
-                            </button>
-                            {selectedImage.status === 'completed' && (
-                              <div className="flex flex-col gap-2 mt-4" ref={singleDropdownRef}>
-                                <AnimatePresence mode="wait">
-                                  {activeDownloadMenu && activeDownloadMenu.targetImages?.[0]?.id === selectedImage.id ? (
-                                    <motion.div
-                                      key="single-download-menu"
-                                      initial={{ opacity: 0, y: -10 }}
-                                      animate={{ opacity: 1, y: 0 }}
-                                      exit={{ opacity: 0, y: -10 }}
-                                      className="w-full p-4 bg-white rounded-2xl border border-slate-200 flex flex-col gap-4 shadow-sm"
-                                    >
-                                      <div className="flex items-center justify-between">
-                                        <span className="text-sm font-bold text-slate-700">
-                                          Format File ({activeDownloadMenu.type === 'adobe' ? 'Adobe Stock' : 'Shutterstock'})
-                                        </span>
-                                        <button onClick={() => setActiveDownloadMenu(null)} className="p-1.5 text-slate-400 hover:bg-slate-100 rounded-lg transition-colors">
-                                          <X className="w-4 h-4" />
-                                        </button>
-                                      </div>
-                                      <div className="flex gap-2">
-                                        {(['.eps', '.jpg', '.png'] as const).map((ext) => (
-                                          <button
-                                            key={ext}
-                                            onClick={() => setExportExtension(ext)}
-                                            className={cn(
-                                              "flex-1 py-2.5 rounded-xl text-sm font-bold transition-all border",
-                                              exportExtension === ext
-                                                ? "bg-indigo-50 border-indigo-200 text-indigo-700 shadow-inner"
-                                                : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
-                                            )}
-                                          >
-                                            {ext}
-                                          </button>
-                                        ))}
-                                      </div>
-                                      <button
-                                        onClick={() => {
-                                          if (activeDownloadMenu.type === 'adobe') downloadAdobeStockCSV([selectedImage]);
-                                          else downloadShutterstockCSV([selectedImage]);
-                                          setActiveDownloadMenu(null);
-                                        }}
-                                        className="w-full py-3 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 transition-all flex items-center justify-center gap-2 shadow-sm"
-                                      >
-                                        <Download className="w-4 h-4" />
-                                        Lanjutkan Download
-                                      </button>
-                                    </motion.div>
-                                  ) : (
-                                    <motion.div 
-                                      key="single-download-buttons"
-                                      initial={{ opacity: 0 }}
-                                      animate={{ opacity: 1 }}
-                                      exit={{ opacity: 0 }}
-                                      className="flex flex-wrap items-center justify-end gap-2"
-                                    >
-                                      <button
-                                        onClick={() => downloadCSV([selectedImage])}
-                                        className="p-2.5 bg-white hover:bg-slate-50 border border-slate-200 text-indigo-600 rounded-xl transition-all flex items-center gap-2 text-xs font-bold shadow-sm active:scale-95"
-                                        title="Download Freepik CSV"
-                                      >
-                                        <Download className="w-4 h-4" />
-                                        Freepik
-                                      </button>
-                                      <button
-                                        onClick={() => setActiveDownloadMenu({ type: 'adobe', targetImages: [selectedImage] })}
-                                        className="p-2.5 bg-white hover:bg-slate-50 border border-slate-200 text-indigo-600 rounded-xl transition-all flex items-center gap-2 text-xs font-bold shadow-sm active:scale-95"
-                                        title="Download Adobe Stock CSV"
-                                      >
-                                        <Download className="w-4 h-4" />
-                                        Adobe Stock
-                                      </button>
-                                      <button
-                                        onClick={() => setActiveDownloadMenu({ type: 'shutterstock', targetImages: [selectedImage] })}
-                                        className="p-2.5 bg-white hover:bg-slate-50 border border-slate-200 text-indigo-600 rounded-xl transition-all flex items-center gap-2 text-xs font-bold shadow-sm active:scale-95"
-                                        title="Download Shutterstock CSV"
-                                      >
-                                        <Download className="w-4 h-4" />
-                                        Shutterstock
-                                      </button>
-                                    </motion.div>
-                                  )}
-                                </AnimatePresence>
-                              </div>
-                            )}
-                          </>
+                          <button
+                            onClick={() => regenerateSingleMetadata(selectedImage.id)}
+                            disabled={isGenerating}
+                            className="p-2 border rounded-xl transition-all flex items-center gap-2 text-xs font-bold shadow-sm bg-white hover:bg-indigo-50 border-slate-200 text-indigo-600"
+                            title="Regenerate"
+                          >
+                            <Sparkles className="w-4 h-4" />
+                          </button>
+                        )}
+                        {!isEditing && selectedImage.status === 'completed' && (
+                          <button onClick={startEditing} className="p-2 bg-white border border-slate-200 text-slate-500 hover:text-indigo-600 rounded-xl transition-colors shadow-sm">
+                            <Edit3 className="w-4 h-4" />
+                          </button>
                         )}
                       </div>
                     </div>
 
-                  {/* Metadata Section */}
-                  <div className="space-y-6">
-                    {selectedImage.status === 'completed' && selectedImage.metadata ? (
-                      <motion.div 
-                        initial={{ opacity: 0, x: 20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        className="space-y-6"
-                      >
-                        <div className="flex justify-end">
-                          {isEditing ? (
-                            <div className="flex gap-2">
-                              <button 
-                                onClick={() => setIsEditing(false)}
-                                className="px-4 py-2 text-xs font-bold text-slate-500 hover:text-slate-700 transition-colors"
-                              >
-                                Batal
-                              </button>
-                              <button 
-                                onClick={saveEdit}
-                                className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold hover:bg-indigo-700 transition-all shadow-sm"
-                              >
-                                Simpan Perubahan
-                              </button>
-                            </div>
-                          ) : (
-                            <button 
-                              onClick={startEditing}
-                              className="px-4 py-2 bg-white border border-slate-200 text-indigo-600 rounded-xl text-xs font-bold hover:bg-slate-50 transition-all shadow-sm flex items-center gap-2"
-                            >
-                              <Edit3 className="w-4 h-4" />
-                              Edit Metadata
-                            </button>
-                          )}
-                        </div>
-
-                        <div className="space-y-2">
-                          <div className="flex justify-between items-center">
-                            <label className="text-[10px] uppercase tracking-[0.2em] text-indigo-600 font-bold">Judul</label>
-                            {!isEditing && (
-                              <button 
-                                onClick={() => copyToClipboard(selectedImage.metadata!.title, 'title')}
-                                className="p-1.5 hover:bg-indigo-50 rounded-lg transition-colors text-indigo-500"
-                                title="Copy Title"
-                              >
-                                {copiedField === 'title' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                              </button>
-                            )}
-                          </div>
-                          {isEditing ? (
-                            <input 
-                              type="text"
-                              value={editData?.title || ''}
-                              onChange={(e) => setEditData(prev => prev ? { ...prev, title: e.target.value } : null)}
-                              className="w-full p-4 rounded-2xl bg-white border border-indigo-500 text-slate-800 font-medium shadow-sm focus:outline-none ring-2 ring-indigo-500/10"
-                            />
-                          ) : (
-                            <div className="p-4 rounded-2xl bg-white border border-slate-200 text-slate-800 font-medium shadow-sm">
-                              {selectedImage.metadata.title}
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="space-y-2">
-                          <div className="flex justify-between items-center">
-                            <label className="text-[10px] uppercase tracking-[0.2em] text-indigo-600 font-bold">Deskripsi</label>
-                            {!isEditing && (
-                              <button 
-                                onClick={() => copyToClipboard(selectedImage.metadata!.description, 'desc')}
-                                className="p-1.5 hover:bg-indigo-50 rounded-lg transition-colors text-indigo-500"
-                                title="Copy Description"
-                              >
-                                {copiedField === 'desc' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                              </button>
-                            )}
-                          </div>
-                          {isEditing ? (
-                            <textarea 
-                              rows={3}
-                              value={editData?.description || ''}
-                              onChange={(e) => setEditData(prev => prev ? { ...prev, description: e.target.value } : null)}
-                              className="w-full p-4 rounded-2xl bg-white border border-indigo-500 text-slate-600 text-sm leading-relaxed shadow-sm focus:outline-none ring-2 ring-indigo-500/10 resize-none"
-                            />
-                          ) : (
-                            <div className="p-4 rounded-2xl bg-white border border-slate-200 text-slate-600 text-sm leading-relaxed shadow-sm">
-                              {selectedImage.metadata.description}
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="space-y-2">
-                          <div className="flex justify-between items-center">
-                            <div className="flex items-center gap-2">
-                              <label className="text-[10px] uppercase tracking-[0.2em] text-indigo-600 font-bold">Kata Kunci</label>
-                              <span className="text-[10px] text-slate-400">
-                                {isEditing ? (editData?.keywords.split(',').filter(k => k.trim() !== '').length || 0) : selectedImage.metadata.keywords.length} keywords
-                              </span>
-                            </div>
-                            {!isEditing && (
-                              <button 
-                                onClick={() => copyToClipboard(selectedImage.metadata!.keywords.join(', '), 'keywords')}
-                                className="p-1.5 hover:bg-indigo-50 rounded-lg transition-colors text-indigo-500"
-                                title="Copy Keywords"
-                              >
-                                {copiedField === 'keywords' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                              </button>
-                            )}
-                          </div>
-                          {isEditing ? (
-                            <textarea 
-                              rows={4}
-                              value={editData?.keywords || ''}
-                              onChange={(e) => setEditData(prev => prev ? { ...prev, keywords: e.target.value } : null)}
-                              placeholder="Pisahkan dengan koma..."
-                              className="w-full p-4 rounded-2xl bg-white border border-indigo-500 text-slate-600 text-sm leading-relaxed shadow-sm focus:outline-none ring-2 ring-indigo-500/10 resize-none"
-                            />
-                          ) : (
-                            <div className="flex flex-wrap gap-2">
-                              {selectedImage.metadata.keywords.map((tag, i) => (
-                                <span 
-                                  key={i}
-                                  className="px-3 py-1 rounded-full bg-white border border-slate-200 text-slate-600 text-[11px] font-medium shadow-sm"
+                    {/* Content Section */}
+                    <div className="space-y-6">
+                      {selectedImage.status === 'completed' && (
+                        <div className="space-y-6">
+                          {/* Metadata Download Menu */}
+                          <div className="flex flex-col gap-2" ref={singleDropdownRef}>
+                            <AnimatePresence mode="wait">
+                              {activeDownloadMenu && activeDownloadMenu.targetImages?.[0]?.id === selectedImage.id ? (
+                                <motion.div
+                                  initial={{ opacity: 0, y: -10 }}
+                                  animate={{ opacity: 1, y: 0 }}
+                                  exit={{ opacity: 0, y: -10 }}
+                                  className="w-full p-4 bg-white rounded-2xl border border-slate-100 flex flex-col gap-4 shadow-xl shadow-indigo-100/20"
                                 >
-                                  {tag}
-                                </span>
-                              ))}
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-sm font-bold text-slate-700">Format File ({activeDownloadMenu.type === 'adobe' ? 'Adobe Store' : 'Shutterstock'})</span>
+                                    <button onClick={() => setActiveDownloadMenu(null)} className="p-1.5 text-slate-400 hover:bg-slate-100 rounded-lg">
+                                      <X className="w-4 h-4" />
+                                    </button>
+                                  </div>
+                                  <div className="flex gap-2">
+                                    {(['.eps', '.jpg', '.png'] as const).map((ext) => (
+                                      <button
+                                        key={ext}
+                                        onClick={() => setExportExtension(ext)}
+                                        className={cn(
+                                          "flex-1 py-2.5 rounded-xl text-sm font-bold transition-all border",
+                                          exportExtension === ext
+                                            ? "bg-indigo-50 border-indigo-200 text-indigo-700"
+                                            : "bg-white border-slate-100 text-slate-500 hover:bg-slate-50"
+                                        )}
+                                      >
+                                        {ext}
+                                      </button>
+                                    ))}
+                                  </div>
+                                  <button
+                                    onClick={() => {
+                                      if (activeDownloadMenu.type === 'adobe') downloadAdobeStockCSV([selectedImage]);
+                                      else downloadShutterstockCSV([selectedImage]);
+                                      setActiveDownloadMenu(null);
+                                    }}
+                                    className="w-full py-3 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 flex items-center justify-center gap-2"
+                                  >
+                                    <Download className="w-4 h-4" />
+                                    Download CSV
+                                  </button>
+                                </motion.div>
+                              ) : (
+                                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-wrap gap-2">
+                                  <button
+                                    onClick={() => downloadCSV([selectedImage])}
+                                    className="px-4 py-2.5 bg-white border border-slate-200 text-indigo-600 rounded-xl text-xs font-bold shadow-sm hover:bg-slate-50 flex items-center gap-2"
+                                  >
+                                    <Download className="w-4 h-4" /> Freepik
+                                  </button>
+                                  <button
+                                    onClick={() => setActiveDownloadMenu({ type: 'adobe', targetImages: [selectedImage] })}
+                                    className="px-4 py-2.5 bg-white border border-slate-200 text-indigo-600 rounded-xl text-xs font-bold shadow-sm hover:bg-slate-50 flex items-center gap-2"
+                                  >
+                                    <Download className="w-4 h-4" /> Adobe Stock
+                                  </button>
+                                  <button
+                                    onClick={() => setActiveDownloadMenu({ type: 'shutterstock', targetImages: [selectedImage] })}
+                                    className="px-4 py-2.5 bg-white border border-slate-200 text-indigo-600 rounded-xl text-xs font-bold shadow-sm hover:bg-slate-50 flex items-center gap-2"
+                                  >
+                                    <Download className="w-4 h-4" /> Shutterstock
+                                  </button>
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+                          </div>
+
+                          {/* Metadata Forms */}
+                          <div className="space-y-4 pt-4 border-t border-slate-100">
+                            {/* Title Field */}
+                            <div className="space-y-2">
+                              <div className="flex justify-between items-center">
+                                <label className="text-[10px] uppercase font-bold text-indigo-600 tracking-wider">Judul</label>
+                                {!isEditing && (
+                                  <button onClick={() => copyToClipboard(selectedImage.metadata!.title, 'title')} className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400">
+                                    {copiedField === 'title' ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+                                  </button>
+                                )}
+                              </div>
+                              {isEditing ? (
+                                <input 
+                                  value={editData?.title || ''}
+                                  onChange={(e) => setEditData(p => p ? {...p, title: e.target.value} : null)}
+                                  className="w-full p-3 bg-white border border-indigo-200 rounded-xl text-sm focus:ring-2 ring-indigo-500/10 focus:outline-none"
+                                />
+                              ) : (
+                                <div className="p-4 bg-white/60 border border-slate-100 rounded-2xl text-slate-800 font-medium text-sm">
+                                  {selectedImage.metadata.title}
+                                </div>
+                              )}
                             </div>
-                          )}
-                        </div>
-                        
-                        <div className="space-y-2 pt-4 border-t border-slate-100">
-                          <label className="text-[10px] uppercase tracking-[0.2em] text-slate-400 font-bold">Generation Details</label>
-                          <div className="flex flex-wrap gap-2">
-                            <div className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-50 border border-slate-100 rounded-lg">
-                              <Sparkles className="w-3 h-3 text-indigo-500" />
-                              <span className="text-[10px] font-bold text-slate-600">{selectedImage.metadata.usedModel}</span>
+
+                            {/* Description Field */}
+                            <div className="space-y-2">
+                              <div className="flex justify-between items-center">
+                                <label className="text-[10px] uppercase font-bold text-indigo-600 tracking-wider">Deskripsi</label>
+                                {!isEditing && (
+                                  <button onClick={() => copyToClipboard(selectedImage.metadata!.description, 'desc')} className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400">
+                                    {copiedField === 'desc' ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+                                  </button>
+                                )}
+                              </div>
+                              {isEditing ? (
+                                <textarea 
+                                  rows={3}
+                                  value={editData?.description || ''}
+                                  onChange={(e) => setEditData(p => p ? {...p, description: e.target.value} : null)}
+                                  className="w-full p-3 bg-white border border-indigo-200 rounded-xl text-sm focus:ring-2 ring-indigo-500/10 focus:outline-none resize-none"
+                                />
+                              ) : (
+                                <div className="p-4 bg-white/60 border border-slate-100 rounded-2xl text-slate-600 text-sm leading-relaxed">
+                                  {selectedImage.metadata.description}
+                                </div>
+                              )}
                             </div>
-                            <div className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-50 border border-slate-100 rounded-lg">
-                              <Key className="w-3 h-3 text-indigo-500" />
-                              <span className="text-[10px] font-bold text-slate-600">••••{selectedImage.metadata.usedApiKey}</span>
+
+                            {/* Keywords Field */}
+                            <div className="space-y-2">
+                              <div className="flex justify-between items-center">
+                                <label className="text-[10px] uppercase font-bold text-indigo-600 tracking-wider">Kata Kunci ({selectedImage.metadata.keywords.length})</label>
+                                {!isEditing && (
+                                  <button onClick={() => copyToClipboard(selectedImage.metadata!.keywords.join(', '), 'keys')} className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400">
+                                    {copiedField === 'keys' ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+                                  </button>
+                                )}
+                              </div>
+                              {isEditing ? (
+                                <textarea 
+                                  rows={4}
+                                  value={editData?.keywords || ''}
+                                  onChange={(e) => setEditData(p => p ? {...p, keywords: e.target.value} : null)}
+                                  placeholder="Keywords separated by commas"
+                                  className="w-full p-3 bg-white border border-indigo-200 rounded-xl text-sm focus:ring-2 ring-indigo-500/10 focus:outline-none resize-none"
+                                />
+                              ) : (
+                                <div className="flex flex-wrap gap-2">
+                                  {selectedImage.metadata.keywords.map((k, i) => (
+                                    <span key={i} className="px-3 py-1 bg-white border border-slate-100 rounded-full text-[11px] font-medium text-slate-600 shadow-sm">
+                                      {k}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
                             </div>
+
+                            {isEditing && (
+                              <div className="flex gap-2 pt-4">
+                                <button onClick={() => setIsEditing(false)} className="flex-1 py-2.5 rounded-xl text-sm font-bold text-slate-500 hover:bg-slate-50 transition-colors">Batal</button>
+                                <button onClick={saveEdit} className="flex-1 py-2.5 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 shadow-lg shadow-indigo-100">Simpan</button>
+                              </div>
+                            )}
                           </div>
                         </div>
-                      </motion.div>
-                    ) : selectedImage.status === 'processing' ? (
-                      <div className="flex flex-col items-center justify-center p-12 text-center space-y-4 bg-white/40 backdrop-blur-md rounded-3xl border border-slate-200">
-                        <div className="relative">
-                          <div className="w-16 h-16 rounded-full border-4 border-indigo-100 border-t-indigo-500 animate-spin" />
-                          <Sparkles className="w-6 h-6 text-indigo-500 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" />
+                      )}
+
+                      {selectedImage.status === 'processing' && (
+                        <div className="py-20 flex flex-col items-center justify-center text-center">
+                          <Loader2 className="w-10 h-10 text-indigo-500 animate-spin mb-4" />
+                          <h3 className="font-bold text-slate-800">Menganalisis Gambar...</h3>
+                          <p className="text-xs text-slate-500 mt-1">Menggunakan {selectedModel}</p>
                         </div>
-                        <div>
-                          <h3 className="text-lg font-bold text-slate-800">Menganalisis Gambar...</h3>
-                          <p className="text-slate-500 text-sm">Gemini AI sedang membaca konten gambar Anda.</p>
+                      )}
+
+                      {selectedImage.status === 'error' && (
+                        <div className="py-20 flex flex-col items-center justify-center text-center">
+                          <AlertCircle className="w-10 h-10 text-red-500 mb-4" />
+                          <h3 className="font-bold text-slate-800">Terjadi Kesalahan</h3>
+                          <p className="text-xs text-red-500 mt-1 max-w-xs">{selectedImage.error}</p>
+                          <button onClick={generateMetadata} className="mt-6 px-6 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold">Coba Lagi</button>
                         </div>
-                      </div>
-                    ) : selectedImage.status === 'error' ? (
-                      <div className="flex flex-col items-center justify-center p-12 text-center space-y-4 bg-white/40 backdrop-blur-md rounded-3xl border border-slate-200">
-                        <div className="w-16 h-16 rounded-full bg-red-50 flex items-center justify-center">
-                          <X className="w-8 h-8 text-red-500" />
+                      )}
+
+                      {selectedImage.status === 'pending' && (
+                        <div className="py-20 flex flex-col items-center justify-center text-center">
+                          <Sparkles className="w-10 h-10 text-indigo-300 mb-4" />
+                          <h3 className="font-bold text-slate-800">Siap Generate</h3>
+                          <p className="text-xs text-slate-500 mt-1">Klik tombol generate di bawah daftar gambar untuk memulai analisis AI</p>
                         </div>
-                        <div>
-                          <h3 className="text-lg font-bold text-slate-800">Terjadi Kesalahan</h3>
-                          <p className="text-slate-500 text-sm">{selectedImage.error}</p>
-                        </div>
-                        <button 
-                          onClick={generateMetadata}
-                          className={cn(
-                            "py-2 px-6 rounded-xl text-sm font-medium transition-all shadow-lg",
-                            apiKeys.length === 0
-                              ? "bg-slate-200 text-slate-500 opacity-60 hover:opacity-80"
-                              : "bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-100"
-                          )}
-                        >
-                          Coba Lagi
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="flex flex-col items-center justify-center p-12 text-center space-y-4 bg-white/40 backdrop-blur-md rounded-3xl border border-slate-200">
-                        <div className="w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center">
-                          <FileText className="w-8 h-8 text-slate-400" />
-                        </div>
-                        <div>
-                          <h3 className="text-lg font-bold text-slate-800">Siap Generate</h3>
-                          <p className="text-slate-500 text-sm">Klik tombol generate untuk membuat metadata otomatis.</p>
-                        </div>
-                      </div>
-                    )}
+                      )}
+                    </div>
+                  </motion.div>
+                ) : (
+                  <div className="bg-white/40 backdrop-blur-md rounded-3xl border border-dashed border-slate-200 p-12 flex flex-col items-center justify-center text-center text-slate-400">
+                    <ImageIcon className="w-12 h-12 mb-4 opacity-50" />
+                    <p className="text-sm">Pilih gambar untuk melihat atau mengedit metadata hasil generate.</p>
                   </div>
-                </div>
-              ) : (
-                <div 
-                  onClick={open}
-                  className={cn(
-                    "min-h-[400px] flex flex-col items-center justify-center text-center p-12 border-2 border-dashed rounded-[2.5rem] transition-all cursor-pointer group",
-                    isDragActive 
-                      ? "border-indigo-400 bg-indigo-50/50" 
-                      : "border-slate-200 bg-white/40 hover:bg-white/60 hover:border-slate-300"
-                  )}
-                >
-                  <div className="w-24 h-24 rounded-3xl bg-indigo-50 flex items-center justify-center mb-6 group-hover:scale-110 transition-transform shadow-sm">
-                    <Upload className="w-10 h-10 text-indigo-500" />
-                  </div>
-                  <h3 className="text-2xl font-bold text-slate-800 mb-2">Mulai Generate Metadata</h3>
-                  <p className="text-slate-500 max-w-sm mb-4">
-                    Seret dan lepas gambar Anda di sini, atau klik untuk memilih file dari komputer Anda.
-                  </p>
-                  <div className="bg-indigo-50 p-4 rounded-2xl mb-8 border border-indigo-100 max-w-sm">
-                    <p className="text-[11px] text-indigo-600 font-medium leading-relaxed">
-                      Catatan: Upload hanya support file JPG, PNG atau SVG. Tetapi file yang di Microstock Wajib Format .EPS agar metadata berjalan.
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-4 text-xs font-medium text-slate-400">
-                    <span className="flex items-center gap-1.5">
-                      <Check className="w-4 h-4 text-green-500" /> Support Bulk
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                      <Check className="w-4 h-4 text-green-500" /> AI Analysis
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                      <Check className="w-4 h-4 text-green-500" /> SEO Ready
-                    </span>
-                  </div>
-                </div>
-              )}
+                )}
+
+              </div>
             </div>
           </div>
         </main>
@@ -1778,15 +1511,40 @@ export default function App() {
                               hasError ? "text-red-700" :
                               "text-slate-500"
                             )}>
-                              {key.substring(0, 8)}••••••••{key.substring(key.length - 4)}
+                              {visibleKeys.has(i) ? key : `${key.substring(0, 8)}••••••••${key.substring(key.length - 4)}`}
                             </span>
                           </div>
-                          <button 
-                            onClick={() => removeKey(i)}
-                            className="p-1.5 hover:bg-red-100 text-red-400 rounded-lg transition-colors shrink-0"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          <div className="flex items-center gap-1">
+                            <button 
+                              onClick={() => {
+                                navigator.clipboard.writeText(key);
+                                setCopiedKeys(prev => new Set(prev).add(i));
+                                setTimeout(() => {
+                                  setCopiedKeys(prev => {
+                                    const next = new Set(prev);
+                                    next.delete(i);
+                                    return next;
+                                  });
+                                }, 2000);
+                              }}
+                              className="p-1.5 hover:bg-slate-200 text-slate-400 rounded-lg transition-colors shrink-0"
+                              title="Copy API Key"
+                            >
+                              {copiedKeys.has(i) ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
+                            </button>
+                            <button 
+                              onClick={() => toggleKeyVisibility(i)}
+                              className="p-1.5 hover:bg-slate-200 text-slate-400 rounded-lg transition-colors shrink-0"
+                            >
+                              {visibleKeys.has(i) ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                            </button>
+                            <button 
+                              onClick={() => removeKey(i)}
+                              className="p-1.5 hover:bg-red-100 text-red-400 rounded-lg transition-colors shrink-0"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
                         </div>
                       );
                     })
@@ -1799,112 +1557,6 @@ export default function App() {
                     Gunakan beberapa API Key untuk menghindari limit kuota. Sistem akan otomatis mengganti key jika terjadi error saat proses generate.
                   </p>
                 </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* History Modal */}
-      <AnimatePresence>
-        {showHistoryModal && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowHistoryModal(false)}
-              className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
-            />
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="relative w-full max-w-4xl max-h-[85vh] bg-white rounded-3xl shadow-2xl overflow-hidden flex flex-col"
-            >
-              <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-white sticky top-0 z-10">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center">
-                    <History className="w-5 h-5 text-indigo-600" />
-                  </div>
-                  <div>
-                    <h2 className="text-lg font-bold text-slate-800">Riwayat Generate</h2>
-                    <p className="text-xs text-slate-500">Metadata yang pernah Anda buat sebelumnya. Data akan otomatis dihapus setelah 3 hari.</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  {historyItems.length > 0 && (
-                    <button 
-                      onClick={handleClearHistory}
-                      className="px-3 py-1.5 text-xs font-bold text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors"
-                    >
-                      Hapus Semua
-                    </button>
-                  )}
-                  <button 
-                    onClick={() => setShowHistoryModal(false)}
-                    className="p-2 hover:bg-slate-100 rounded-xl transition-colors text-slate-400 hover:text-slate-600"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-              </div>
-
-              <div className="p-6 overflow-y-auto flex-1 bg-slate-50/50">
-                {historyItems.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center h-40 text-slate-400">
-                    <History className="w-12 h-12 mb-3 opacity-20" />
-                    <p className="text-sm font-medium">Belum ada riwayat generate metadata.</p>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {historyItems.map((item) => {
-                      const previewUrl = URL.createObjectURL(item.file);
-                      return (
-                        <div key={item.id} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex gap-4">
-                          <img src={previewUrl} alt="Preview" className="w-24 h-24 object-cover rounded-xl bg-slate-100" onLoad={() => URL.revokeObjectURL(previewUrl)} />
-                          <div className="flex-1 min-w-0 flex flex-col">
-                            <h4 className="text-sm font-bold text-slate-800 truncate" title={item.metadata?.title}>{item.metadata?.title || 'Tanpa Judul'}</h4>
-                            <p className="text-xs text-slate-500 mt-1 line-clamp-2">{item.metadata?.description}</p>
-                            <div className="mt-auto pt-3 flex items-center justify-between">
-                              <span className="text-[10px] text-slate-400 font-medium">
-                                {new Date(item.timestamp).toLocaleString('id-ID')}
-                              </span>
-                              <div className="flex items-center gap-2">
-                                <button
-                                  onClick={() => removeHistoryItem(item.id)}
-                                  className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                                  title="Hapus"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    const newImage: ImageData = {
-                                      ...item,
-                                      preview: URL.createObjectURL(item.file)
-                                    };
-                                    setImages(prev => {
-                                      if (!prev.find(p => p.id === item.id)) {
-                                        return [...prev, newImage];
-                                      }
-                                      return prev;
-                                    });
-                                    setShowHistoryModal(false);
-                                    setSelectedId(item.id);
-                                  }}
-                                  className="px-3 py-1.5 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 rounded-lg text-xs font-bold transition-colors"
-                                >
-                                  Buka di Workspace
-                                </button>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
               </div>
             </motion.div>
           </div>
@@ -2135,5 +1787,6 @@ export default function App() {
         }
       `}</style>
     </div>
+  </>
   );
 }
