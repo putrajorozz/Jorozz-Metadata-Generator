@@ -1269,6 +1269,13 @@ export default function App() {
 
                           {/* Metadata Forms */}
                           <div className="space-y-4 pt-4 border-t border-slate-100">
+                            {/* Model and Key Info */}
+                            <div className="p-3 bg-indigo-50 rounded-xl border border-indigo-100 mb-4">
+                              <p className="text-[10px] text-indigo-800">
+                                Metadata berhasil digenerate menggunakan model <strong>{selectedImage.metadata!.usedModel}</strong> dengan API Key <strong>{selectedImage.metadata!.usedApiKey.substring(0, 4)}••••••••{selectedImage.metadata!.usedApiKey.substring(selectedImage.metadata!.usedApiKey.length - 4)}</strong>
+                              </p>
+                            </div>
+                            
                             {/* Title Field */}
                             <div className="space-y-2">
                               <div className="flex justify-between items-center">
