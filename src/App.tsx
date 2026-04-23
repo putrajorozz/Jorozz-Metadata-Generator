@@ -96,7 +96,7 @@ export default function App() {
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState(MODELS[0].id);
   const [keywordCount, setKeywordCount] = useState(50);
-  const [titleLength, setTitleLength] = useState(20);
+  const [titleLength, setTitleLength] = useState(100);
   const [exportExtension, setExportExtension] = useState<'.eps' | '.jpg' | '.png'>('.eps');
   const [exportScope, setExportScope] = useState<'all' | 'selected'>('all');
   const [activeDownloadMenu, setActiveDownloadMenu] = useState<{
@@ -1000,50 +1000,6 @@ export default function App() {
                       </div>
                     )}
                     
-                    {/* Bulk Download Header */}
-                    {images.length > 0 && images.every(img => img.status === 'completed') && (
-                      <div className="bg-white/40 backdrop-blur-md rounded-2xl border border-slate-200 p-3 shadow-sm">
-                        <button 
-                          onClick={() => setShowBulkOptions(!showBulkOptions)}
-                          className="flex items-center justify-between w-full text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]"
-                        >
-                          Bulk Download Export
-                          {showBulkOptions ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                        </button>
-                        
-                        {showBulkOptions && (
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            <div className="flex gap-1 w-full">
-                              {(['.eps', '.jpg', '.png'] as const).map((ext) => (
-                                <button
-                                  key={ext}
-                                  onClick={() => setExportExtension(ext)}
-                                  className={cn(
-                                    "flex-1 py-1.5 rounded-lg text-[10px] font-bold transition-all border",
-                                    exportExtension === ext
-                                      ? "bg-indigo-50 border-indigo-200 text-indigo-700"
-                                      : "bg-slate-50 border-slate-100 text-slate-400 hover:bg-slate-100"
-                                  )}
-                                >
-                                  {ext}
-                                </button>
-                              ))}
-                            </div>
-
-                            <button onClick={() => downloadCSV()} className="flex-1 py-1.5 bg-white border border-indigo-200 text-indigo-600 rounded-lg text-[10px] font-bold hover:bg-indigo-50 shadow-sm transition-all flex items-center justify-center gap-1.5">
-                              <Download className="w-3 h-3" /> Freepik
-                            </button>
-                            <button onClick={() => downloadAdobeStockCSV()} className="flex-1 py-1.5 bg-white border border-indigo-200 text-indigo-600 rounded-lg text-[10px] font-bold hover:bg-indigo-50 shadow-sm transition-all flex items-center justify-center gap-1.5">
-                              <Download className="w-3 h-3" /> Adobe
-                            </button>
-                            <button onClick={() => downloadShutterstockCSV()} className="flex-1 py-1.5 bg-white border border-indigo-200 text-indigo-600 rounded-lg text-[10px] font-bold hover:bg-indigo-50 shadow-sm transition-all flex items-center justify-center gap-1.5">
-                              <Download className="w-3 h-3" /> Shutterstock
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                    
                     <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">Daftar Gambar ({images.length})</h3>
                     <div className="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-4 xl:grid-cols-5 gap-2.5">
                       {images.map((img) => (
@@ -1117,12 +1073,12 @@ export default function App() {
                           <div className="space-y-2">
                             <div className="flex items-center justify-between">
                               <label className="text-xs font-bold text-slate-600">Title Length ({titleLength})</label>
-                              <button onClick={() => setTitleLength(20)} className="text-[10px] text-indigo-500 hover:text-indigo-700 font-bold">Reset</button>
+                              <button onClick={() => setTitleLength(100)} className="text-[10px] text-indigo-500 hover:text-indigo-700 font-bold">Reset</button>
                             </div>
                             <input 
                               type="range"
-                              min="5"
-                              max="100"
+                              min="30"
+                              max="200"
                               value={titleLength}
                               onChange={(e) => setTitleLength(parseInt(e.target.value))}
                               className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
@@ -1136,7 +1092,7 @@ export default function App() {
                             <input 
                               type="range"
                               min="5"
-                              max="100"
+                              max="50"
                               value={keywordCount}
                               onChange={(e) => setKeywordCount(parseInt(e.target.value))}
                               className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
