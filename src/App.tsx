@@ -130,6 +130,8 @@ export default function App() {
   const [showInfoPage, setShowInfoPage] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [processingQueue, setProcessingQueue] = useState<string[]>([]); // Track job IDs
+  const MAX_CONCURRENT = 3; // Limit parallel AI processing
   const [confirmModal, setConfirmModal] = useState<{
     isOpen: boolean;
     title: string;
@@ -236,12 +238,12 @@ export default function App() {
     try {
       const newImages: ImageData[] = [];
       for (const file of acceptedFiles) {
-        // Compress image for preview to save memory
-        const base64Preview = await processImage(file);
+        // Use resized Blob URL instead of DataURL (Base64) to save memory
+        const blobUrl = await processImage(file);
         newImages.push({
           id: Math.random().toString(36).substring(7),
           file,
-          preview: base64Preview,
+          preview: blobUrl,
           status: 'pending' as const,
           isAiGenerated: false,
         });
@@ -270,23 +272,25 @@ export default function App() {
 
   const processImage = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const img = new Image();
-        img.onload = () => {
-          const canvas = document.createElement('canvas');
-          const MAX_WIDTH = 400;
-          const scaleSize = MAX_WIDTH / img.width;
-          canvas.width = MAX_WIDTH;
-          canvas.height = img.height * scaleSize;
-          const ctx = canvas.getContext('2d');
-          ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
-          resolve(canvas.toDataURL('image/jpeg', 0.6));
-        };
-        img.src = e.target?.result as string;
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_WIDTH = 400;
+        const scaleSize = MAX_WIDTH / img.width;
+        canvas.width = MAX_WIDTH;
+        canvas.height = img.height * scaleSize;
+        const ctx = canvas.getContext('2d');
+        ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob((blob) => {
+          if (blob) {
+            resolve(URL.createObjectURL(blob));
+          } else {
+            reject(new Error("Canvas to Blob failed"));
+          }
+        }, 'image/jpeg', 0.6);
       };
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
+      img.onerror = reject;
+      img.src = URL.createObjectURL(file);
     });
   };
 
@@ -297,12 +301,15 @@ export default function App() {
       message: 'Apakah Anda yakin ingin menghapus gambar ini?',
       onConfirm: () => {
         setImages(prev => {
+          const imgToRemove = prev.find(img => img.id === id);
+          if (imgToRemove) URL.revokeObjectURL(imgToRemove.preview);
           const filtered = prev.filter(img => img.id !== id);
           if (selectedId === id) {
             setSelectedId(filtered.length > 0 ? filtered[0].id : null);
           }
           return filtered;
         });
+        addToast("Gambar dihapus", "info");
       }
     });
   };
