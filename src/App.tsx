@@ -221,7 +221,10 @@ export default function App() {
 
   const addToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
     const id = Math.random().toString(36).substring(7);
-    setToasts(prev => [...prev, { id, message, type }]);
+    setToasts(prev => {
+      const newToasts = [...prev, { id, message, type }];
+      return newToasts.length > 3 ? newToasts.slice(newToasts.length - 3) : newToasts;
+    });
     setTimeout(() => {
       setToasts(prev => prev.filter(t => t.id !== id));
     }, 3000);
@@ -360,8 +363,14 @@ export default function App() {
           const ai = new GoogleGenAI({ apiKey: currentKey });
 
           try {
-            const base64Data = img.preview.split(",")[1];
-            let mimeType = "image/jpeg";
+            // Read file as base64
+            const reader = new FileReader();
+            const base64Data = await new Promise<string>((resolve, reject) => {
+              reader.onload = () => resolve((reader.result as string).split(",")[1]);
+              reader.onerror = reject;
+              reader.readAsDataURL(img.file);
+            });
+            let mimeType = img.file.type || "image/jpeg";
             
             const promptText = `Analyze this image for microstock metadata (Shutterstock, Adobe Stock, etc.). 
                     Generate the following in JSON format:
@@ -521,8 +530,14 @@ export default function App() {
         const ai = new GoogleGenAI({ apiKey: currentKey });
 
         try {
-          const base64Data = img.preview.split(",")[1];
-          let mimeType = "image/jpeg";
+          // Read file as base64
+          const reader = new FileReader();
+          const base64Data = await new Promise<string>((resolve, reject) => {
+            reader.onload = () => resolve((reader.result as string).split(",")[1]);
+            reader.onerror = reject;
+            reader.readAsDataURL(img.file);
+          });
+          let mimeType = img.file.type || "image/jpeg";
           
           const promptText = `Analyze this image for microstock metadata (Shutterstock, Adobe Stock, etc.). 
                   Generate the following in JSON format:
