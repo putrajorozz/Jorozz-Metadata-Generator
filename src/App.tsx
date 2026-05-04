@@ -28,7 +28,8 @@ import {
   BarChart2,
   Database,
   Eye,
-  EyeOff
+  EyeOff,
+  Star
 } from 'lucide-react';
 import { GoogleGenAI, Type } from "@google/genai";
 import { cn } from './lib/utils';
@@ -83,7 +84,12 @@ interface Toast {
 }
 
 const MODELS = [
+  { id: "gemini-pro-latest", name: "Gemini Pro Latest", description: "Model Pro terbaru, kemampuan penalaran kuat" },
+  { id: "gemini-flash-latest", name: "Gemini Flash Latest", description: "Model Flash terbaru, efisien & cepat" },
   { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", description: "Model terbaru, sangat cepat & akurat" },
+  { id: "gemini-2.5-flash-lite", name: "Gemini 2.5 Flash Lite", description: "Versi ringan Gemini 2.5 Flash" },
+  { id: "gemini-2.0-flash", name: "Gemini 2.0 Flash", description: "Model Gemini 2.0 Flash handal" },
+  { id: "gemini-2.0-flash-lite", name: "Gemini 2.0 Flash Lite", description: "Versi ringan Gemini 2.0 Flash" },
   { id: "gemini-3.1-flash-lite-preview", name: "Gemini 3.1 Flash Lite (Free Tier)", description: "Paling hemat kuota & cepat" },
   { id: "gemini-3-flash-preview", name: "Gemini 3 Flash (Free Tier)", description: "Keseimbangan kualitas & kecepatan" },
 ];
@@ -98,6 +104,8 @@ export default function App() {
   const [keywordCount, setKeywordCount] = useState(50);
   const [titleLength, setTitleLength] = useState(100);
   const [exportExtension, setExportExtension] = useState<'.eps' | '.jpg' | '.png'>('.eps');
+  const [exportPlatform, setExportPlatform] = useState<'Freepik' | 'Adobe' | 'Shutterstock' | null>(null);
+  const [favoriteModelId, setFavoriteModelId] = useState<string | null>(() => localStorage.getItem('favorite_model_id') || null);
   const [exportScope, setExportScope] = useState<'all' | 'selected'>('all');
   const [activeDownloadMenu, setActiveDownloadMenu] = useState<{
     type: 'adobe' | 'shutterstock';
@@ -152,6 +160,14 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('show_settings_panel', JSON.stringify(showSettingsPanel));
   }, [showSettingsPanel]);
+
+  useEffect(() => {
+    if (favoriteModelId) {
+      localStorage.setItem('favorite_model_id', favoriteModelId);
+    } else {
+      localStorage.removeItem('favorite_model_id');
+    }
+  }, [favoriteModelId]);
 
   const toggleLog = (id: string) => {
     setExpandedLogs(prev => 
@@ -346,11 +362,15 @@ export default function App() {
       ));
 
       let success = false;
-      let modelIndex = MODELS.findIndex(m => m.id === selectedModel);
+      let modelIndex = favoriteModelId 
+        ? MODELS.findIndex(m => m.id === favoriteModelId) 
+        : MODELS.findIndex(m => m.id === selectedModel);
       if (modelIndex === -1) modelIndex = 0;
       
       let modelsTried = 0;
       const totalModels = MODELS.length;
+
+      let lastErrorMessage = "Semua API Key dan Model gagal atau kuota habis";
 
       while (!success && modelsTried < totalModels) {
         const currentModelId = MODELS[modelIndex].id;
@@ -452,14 +472,14 @@ export default function App() {
             currentKeyIndex = (currentKeyIndex + 1) % activeKeys.length;
           } catch (error) {
             console.error(`Error with key ${currentKeyIndex} on model ${currentModelId}:`, error);
+            lastErrorMessage = error instanceof Error ? error.message : String(error);
             const failedKey = activeKeys[currentKeyIndex];
             setErrorApiKeys(prev => [...new Set([...prev, failedKey])]);
             
-            const errorMessage = error instanceof Error ? error.message : String(error);
-            if (errorMessage.includes("API_KEY_INVALID") || errorMessage.includes("403") || errorMessage.includes("401")) {
+            if (lastErrorMessage.includes("API_KEY_INVALID") || lastErrorMessage.includes("403") || lastErrorMessage.includes("401")) {
               addToast(`API Key tidak valid: ${failedKey.substring(0, 8)}...`, "error");
             } else {
-              addToast(`API Key error, mencoba key berikutnya...`, "info");
+              addToast(`Memeriksa model/key lain...`, "info");
             }
 
             currentKeyIndex = (currentKeyIndex + 1) % activeKeys.length;
@@ -479,7 +499,7 @@ export default function App() {
 
       if (!success) {
         setImages(prev => prev.map(i => 
-          i.id === img.id ? { ...i, status: 'error', error: "Semua API Key dan Model gagal atau kuota habis" } : i
+          i.id === img.id ? { ...i, status: 'error', error: lastErrorMessage } : i
         ));
         addToast(`Gagal generate: ${img.file.name}`, "error");
       }
@@ -513,7 +533,9 @@ export default function App() {
     let currentKeyIndex = 0;
     let success = false;
     
-    let modelIndex = MODELS.findIndex(m => m.id === selectedModel);
+    let modelIndex = favoriteModelId 
+      ? MODELS.findIndex(m => m.id === favoriteModelId) 
+      : MODELS.findIndex(m => m.id === selectedModel);
     if (modelIndex === -1) modelIndex = 0;
     
     let modelsTried = 0;
@@ -884,14 +906,25 @@ export default function App() {
                             setShowModelDropdown(false);
                           }}
                           className={cn(
-                            "w-full px-4 py-3 text-left transition-colors flex flex-col gap-0.5",
+                            "w-full px-4 py-3 text-left transition-colors flex items-center justify-between gap-2",
                             selectedModel === m.id
                               ? "bg-indigo-50 text-indigo-600"
                               : "text-slate-600 hover:bg-slate-50"
                           )}
                         >
-                          <span className="text-[11px] font-bold">{m.name}</span>
-                          <span className="text-[9px] text-slate-400 leading-tight">{m.description}</span>
+                          <div className="flex flex-col gap-0.5">
+                            <span className="text-[11px] font-bold">{m.name}</span>
+                            <span className="text-[9px] text-slate-400 leading-tight">{m.description}</span>
+                          </div>
+                          <div 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setFavoriteModelId(favoriteModelId === m.id ? null : m.id);
+                            }}
+                            className="p-1 hover:bg-slate-200 rounded-full cursor-pointer"
+                          >
+                            <Star className={cn("w-3.5 h-3.5", favoriteModelId === m.id ? "text-yellow-500 fill-current" : "text-slate-300")} />
+                          </div>
                         </button>
                       ))}
                     </motion.div>
@@ -978,50 +1011,6 @@ export default function App() {
                 {/* Grid Image Gallery */}
                 {images.length > 0 && (
                   <div className="bg-white/40 backdrop-blur-md rounded-3xl border border-slate-200 p-4 sm:p-6 space-y-4">
-                    {/* Bulk Download Header */}
-                    {images.length > 0 && images.every(img => img.status === 'completed') && (
-                      <div className="bg-white/40 backdrop-blur-md rounded-2xl border border-slate-200 p-3 shadow-sm">
-                        <button 
-                          onClick={() => setShowBulkOptions(!showBulkOptions)}
-                          className="flex items-center justify-between w-full text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]"
-                        >
-                          Bulk Download Export
-                          {showBulkOptions ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                        </button>
-                        
-                        {showBulkOptions && (
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            <div className="flex gap-1 w-full">
-                              {(['.eps', '.jpg', '.png'] as const).map((ext) => (
-                                <button
-                                  key={ext}
-                                  onClick={() => setExportExtension(ext)}
-                                  className={cn(
-                                    "flex-1 py-1.5 rounded-lg text-[10px] font-bold transition-all border",
-                                    exportExtension === ext
-                                      ? "bg-indigo-50 border-indigo-200 text-indigo-700"
-                                      : "bg-slate-50 border-slate-100 text-slate-400 hover:bg-slate-100"
-                                  )}
-                                >
-                                  {ext}
-                                </button>
-                              ))}
-                            </div>
-
-                            <button onClick={() => downloadCSV()} className="flex-1 py-1.5 bg-white border border-indigo-200 text-indigo-600 rounded-lg text-[10px] font-bold hover:bg-indigo-50 shadow-sm transition-all flex items-center justify-center gap-1.5">
-                              <Download className="w-3 h-3" /> Freepik
-                            </button>
-                            <button onClick={() => downloadAdobeStockCSV()} className="flex-1 py-1.5 bg-white border border-indigo-200 text-indigo-600 rounded-lg text-[10px] font-bold hover:bg-indigo-50 shadow-sm transition-all flex items-center justify-center gap-1.5">
-                              <Download className="w-3 h-3" /> Adobe
-                            </button>
-                            <button onClick={() => downloadShutterstockCSV()} className="flex-1 py-1.5 bg-white border border-indigo-200 text-indigo-600 rounded-lg text-[10px] font-bold hover:bg-indigo-50 shadow-sm transition-all flex items-center justify-center gap-1.5">
-                              <Download className="w-3 h-3" /> Shutterstock
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                    
                     <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">Daftar Gambar ({images.length})</h3>
                     <div className="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-4 xl:grid-cols-5 gap-2.5">
                       {images.map((img) => (
@@ -1138,6 +1127,51 @@ export default function App() {
 
               {/* Right Column: AI Generation and Detailed View */}
               <div className="space-y-6">
+                {/* Bulk Download Header */}
+                {images.length > 0 && images.every(img => img.status === 'completed') && (
+                  <div className="bg-white rounded-3xl border border-indigo-100 p-4 shadow-sm shadow-indigo-100/50">
+                    <div className="text-[10px] font-bold text-slate-800 uppercase tracking-[0.2em] mb-4">Bulk Download Export</div>
+                    
+                    <div className="flex flex-col gap-3">
+                      <div className="grid grid-cols-3 gap-2">
+                        {(['Freepik', 'Adobe', 'Shutterstock'] as const).map((platform) => (
+                          <div key={platform} className="flex flex-col gap-2">
+                            <button 
+                              onClick={() => setExportPlatform(exportPlatform === platform ? null : platform)}
+                              className={cn(
+                                "py-2 border rounded-xl text-[10px] font-bold transition-all flex flex-col items-center justify-center gap-1",
+                                exportPlatform === platform
+                                  ? "bg-indigo-600 border-indigo-600 text-white"
+                                  : "bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100"
+                              )}
+                            >
+                              <Download className="w-4 h-4" /> {platform}
+                            </button>
+                            {exportPlatform === platform && (
+                              <div className="flex gap-1">
+                                {(['.eps', '.jpg', '.png'] as const).map((ext) => (
+                                  <button
+                                    key={ext}
+                                    onClick={() => {
+                                      setExportExtension(ext);
+                                      if (platform === 'Freepik') downloadCSV();
+                                      else if (platform === 'Adobe') downloadAdobeStockCSV();
+                                      else downloadShutterstockCSV();
+                                    }}
+                                    className="flex-1 py-1 rounded-lg text-[9px] font-bold bg-slate-100 text-slate-600 hover:bg-slate-200"
+                                  >
+                                    {ext}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+                
                 {/* Result/Detail Area */}
                 {selectedImage ? (
                   <motion.div 
