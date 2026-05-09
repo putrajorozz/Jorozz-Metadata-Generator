@@ -227,6 +227,15 @@ export default function App() {
     setEditData(null);
   }, [selectedId]);
 
+  useEffect(() => {
+    if (selectedId) {
+      const element = document.getElementById(`image-item-${selectedId}`);
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }
+  }, [selectedId]);
+
   // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -279,7 +288,7 @@ export default function App() {
         });
       }
       setImages(prev => [...prev, ...newImages]);
-      if (!selectedId && newImages.length > 0) {
+      if (newImages.length > 0) {
         setSelectedId(newImages[0].id);
       }
     } catch (err) {
@@ -380,6 +389,7 @@ export default function App() {
     let currentKeyIndex = 0;
 
     for (const img of pendingImages) {
+      setSelectedId(img.id);
       setImages(prev => prev.map(i => 
         i.id === img.id ? { ...i, status: 'processing' } : i
       ));
@@ -550,6 +560,7 @@ export default function App() {
 
     const activeKeys = apiKeys;
 
+    setSelectedId(id);
     setImages(prev => prev.map(i => i.id === id ? { ...i, status: 'processing' } : i));
     setErrorApiKeys([]);
     
@@ -1039,6 +1050,7 @@ export default function App() {
                       {images.map((img) => (
                         <div
                           key={img.id}
+                          id={`image-item-${img.id}`}
                           className={cn(
                             "group relative aspect-square rounded-xl overflow-hidden border-2 transition-all cursor-pointer shadow-sm",
                             selectedId === img.id ? "border-indigo-500 ring-4 ring-indigo-50 scale-105 z-10" : "border-white bg-white/50 hover:border-indigo-200"
