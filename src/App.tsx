@@ -169,6 +169,17 @@ export default function App() {
     }
   }, [favoriteModelId]);
 
+  const [isBatchHubCollapsed, setIsBatchHubCollapsed] = useState<boolean>(() => {
+    const saved = localStorage.getItem('isBatchHubCollapsed');
+    return saved === 'true';
+  });
+
+  const toggleBatchHub = () => {
+    const newState = !isBatchHubCollapsed;
+    setIsBatchHubCollapsed(newState);
+    localStorage.setItem('isBatchHubCollapsed', String(newState));
+  };
+
   const toggleLog = (id: string) => {
     setExpandedLogs(prev => 
       prev.includes(id) ? prev.filter(v => v !== id) : [...prev, id]
@@ -1139,50 +1150,141 @@ export default function App() {
 
               {/* Right Column: AI Generation and Detailed View */}
               <div className="space-y-6">
-                {/* Bulk Download Header */}
-                {images.length > 0 && images.every(img => img.status === 'completed') && (
-                  <div className="bg-white rounded-3xl border border-indigo-100 p-4 shadow-sm shadow-indigo-100/50">
-                    <div className="text-[10px] font-bold text-slate-800 uppercase tracking-[0.2em] mb-4">Bulk Download Export</div>
-                    
-                    <div className="flex flex-col gap-3">
-                      <div className="grid grid-cols-3 gap-2">
-                        {(['Freepik', 'Adobe', 'Shutterstock'] as const).map((platform) => (
-                          <div key={platform} className="flex flex-col gap-2">
-                            <button 
-                              onClick={() => setExportPlatform(exportPlatform === platform ? null : platform)}
-                              className={cn(
-                                "py-2 border rounded-xl text-[10px] font-bold transition-all flex flex-col items-center justify-center gap-1",
-                                exportPlatform === platform
-                                  ? "bg-indigo-600 border-indigo-600 text-white"
-                                  : "bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100"
-                              )}
+                {/* Metadata Export Hub Batch Center */}
+                {images.length > 0 && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="relative group z-20"
+                  >
+                    <div className={cn(
+                      "relative bg-white rounded-3xl border border-slate-100 shadow-xl shadow-slate-200/40 transition-all duration-300 overflow-hidden",
+                      isBatchHubCollapsed ? "p-3" : "p-4"
+                    )}>
+                      {/* Header */}
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <button 
+                            onClick={toggleBatchHub}
+                            className="w-8 h-8 rounded-xl bg-slate-50 flex items-center justify-center text-slate-400 hover:bg-indigo-50 hover:text-indigo-600 transition-colors"
+                          >
+                            <motion.div
+                              animate={{ rotate: isBatchHubCollapsed ? 0 : 180 }}
+                              transition={{ duration: 0.3 }}
                             >
-                              <Download className="w-4 h-4" /> {platform}
-                            </button>
-                            {exportPlatform === platform && (
-                              <div className="flex gap-1">
-                                {(['.eps', '.jpg', '.png'] as const).map((ext) => (
-                                  <button
-                                    key={ext}
-                                    onClick={() => {
-                                      setExportExtension(ext);
-                                      if (platform === 'Freepik') downloadCSV();
-                                      else if (platform === 'Adobe') downloadAdobeStockCSV();
-                                      else downloadShutterstockCSV();
-                                    }}
-                                    className="flex-1 py-1 rounded-lg text-[9px] font-bold bg-slate-100 text-slate-600 hover:bg-slate-200"
-                                  >
-                                    {ext}
-                                  </button>
-                                ))}
+                              <ChevronDown className="w-4 h-4" />
+                            </motion.div>
+                          </button>
+                          
+                          <div className="flex flex-col">
+                            <span className="text-[8px] font-black text-slate-300 uppercase tracking-[0.2em] leading-none mb-0.5">Metadata Export Hub</span>
+                            <h3 className="text-xs font-black text-slate-800 tracking-tight leading-none uppercase">Batch Center</h3>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                          <div className="flex -space-x-1.5">
+                            {images.slice(0, 3).map((img) => (
+                              <img 
+                                key={img.id} 
+                                src={img.preview} 
+                                alt="" 
+                                className="w-5 h-5 rounded-lg border border-white object-cover shadow-sm bg-slate-100"
+                                referrerPolicy="no-referrer"
+                              />
+                            ))}
+                          </div>
+                          <div className="px-2 py-0.5 rounded-lg bg-indigo-50 border border-indigo-100/30">
+                            <span className="text-[9px] font-bold text-indigo-600">{images.length} File</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Collapsible Content */}
+                      <AnimatePresence>
+                        {!isBatchHubCollapsed && (
+                          <motion.div
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: 'auto', opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            className="overflow-hidden"
+                          >
+                            <div className="pt-4 grid grid-cols-1 sm:grid-cols-3 gap-2">
+                              {(['Freepik', 'Adobe', 'Shutterstock'] as const).map((platform) => {
+                                const isReady = images.length > 0 && images.every(img => img.status === 'completed');
+                                
+                                return (
+                                  <div key={platform} className="flex flex-col gap-1.5">
+                                    <button 
+                                      disabled={!isReady}
+                                      onClick={() => isReady && setExportPlatform(exportPlatform === platform ? null : platform)}
+                                      className={cn(
+                                        "relative group/btn h-9 overflow-hidden rounded-xl border transition-all duration-200 flex items-center justify-center gap-2 active:scale-95",
+                                        !isReady 
+                                          ? "bg-slate-50 border-slate-100 text-slate-200 cursor-not-allowed"
+                                          : exportPlatform === platform
+                                            ? "bg-indigo-600 border-indigo-500 text-white shadow-md shadow-indigo-100/50"
+                                            : "bg-white border-slate-100 text-slate-700 hover:border-indigo-200 hover:bg-slate-50"
+                                      )}
+                                    >
+                                      {isReady && <Download className={cn("w-3 h-3 transition-colors", exportPlatform === platform ? "text-white" : "text-slate-400")} />}
+                                      <span className="text-[10px] font-black tracking-tight">{platform.toUpperCase()}</span>
+                                    </button>
+
+                                    <AnimatePresence>
+                                      {isReady && exportPlatform === platform && (
+                                        <motion.div 
+                                          initial={{ opacity: 0, height: 0 }}
+                                          animate={{ opacity: 1, height: 'auto' }}
+                                          exit={{ opacity: 0, height: 0 }}
+                                          className="flex gap-1 overflow-hidden"
+                                        >
+                                          {(['.eps', '.jpg', '.png'] as const).map((ext) => (
+                                            <button
+                                              key={ext}
+                                              onClick={() => {
+                                                setExportExtension(ext);
+                                                if (platform === 'Freepik') downloadCSV();
+                                                else if (platform === 'Adobe') downloadAdobeStockCSV();
+                                                else downloadShutterstockCSV();
+                                                addToast(`Batch Export: ${platform} (${ext})`, "success");
+                                              }}
+                                              className="flex-1 py-1.5 rounded-lg text-[8px] font-black bg-slate-50 text-slate-500 border border-slate-100 hover:bg-indigo-600 hover:text-white transition-all"
+                                            >
+                                              {ext.toUpperCase().replace('.', '')}
+                                            </button>
+                                          ))}
+                                        </motion.div>
+                                      )}
+                                    </AnimatePresence>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                            
+                            {!images.every(img => img.status === 'completed') && (
+                              <div className="mt-3 p-2 rounded-xl bg-amber-50 border border-amber-100/50 flex items-center gap-2">
+                                <div className="w-6 h-6 rounded-lg bg-white flex items-center justify-center shadow-xs">
+                                  <Database className="w-3 h-3 text-amber-500 animate-pulse" />
+                                </div>
+                                <span className="text-[9px] font-bold text-amber-700 leading-none">Menunggu Sinkronisasi Aset...</span>
                               </div>
                             )}
-                          </div>
-                        ))}
-                      </div>
+
+                            <div className="mt-3 pt-2 border-t border-slate-50 flex items-center justify-between opacity-30">
+                              <span className="text-[7px] font-black text-slate-300 uppercase tracking-widest leading-none">v2.5 Hub Engine</span>
+                              <div className="flex gap-1">
+                                <div className="w-1 h-1 rounded-full bg-slate-200"></div>
+                                <div className="w-1 h-1 rounded-full bg-slate-200"></div>
+                              </div>
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
                     </div>
-                  </div>
+                  </motion.div>
                 )}
+
                 
                 {/* Result/Detail Area */}
                 {selectedImage ? (
