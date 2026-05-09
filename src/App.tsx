@@ -289,6 +289,18 @@ export default function App() {
     noClick: true
   });
 
+  const getErrorMessage = (error: any): string => {
+    if (error instanceof Error) return error.message;
+    if (typeof error === 'string') return error;
+    if (error && error.type === 'error' && error.target instanceof FileReader) {
+      return error.target.error ? error.target.error.message : "Gagal membaca file gambar";
+    }
+    if (error && error.type === 'error' && error.target instanceof Image) {
+      return "Gagal memuat gambar";
+    }
+    return "Terjadi kesalahan yang tidak diketahui";
+  };
+
   const processImage = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
       const img = new Image();
@@ -308,7 +320,7 @@ export default function App() {
           }
         }, 'image/jpeg', 0.6);
       };
-      img.onerror = reject;
+      img.onerror = () => reject(new Error("Gagal memuat gambar untuk preview"));
       img.src = URL.createObjectURL(file);
     });
   };
@@ -387,7 +399,7 @@ export default function App() {
             const reader = new FileReader();
             const base64Data = await new Promise<string>((resolve, reject) => {
               reader.onload = () => resolve((reader.result as string).split(",")[1]);
-              reader.onerror = reject;
+              reader.onerror = () => reject(new Error(reader.error?.message || "Gagal membaca file gambar"));
               reader.readAsDataURL(img.file);
             });
             let mimeType = img.file.type || "image/jpeg";
@@ -472,7 +484,7 @@ export default function App() {
             currentKeyIndex = (currentKeyIndex + 1) % activeKeys.length;
           } catch (error) {
             console.error(`Error with key ${currentKeyIndex} on model ${currentModelId}:`, error);
-            lastErrorMessage = error instanceof Error ? error.message : String(error);
+            lastErrorMessage = getErrorMessage(error);
             const failedKey = activeKeys[currentKeyIndex];
             setErrorApiKeys(prev => [...new Set([...prev, failedKey])]);
             
@@ -556,7 +568,7 @@ export default function App() {
           const reader = new FileReader();
           const base64Data = await new Promise<string>((resolve, reject) => {
             reader.onload = () => resolve((reader.result as string).split(",")[1]);
-            reader.onerror = reject;
+            reader.onerror = () => reject(new Error(reader.error?.message || "Gagal membaca file gambar"));
             reader.readAsDataURL(img.file);
           });
           let mimeType = img.file.type || "image/jpeg";
@@ -638,7 +650,7 @@ export default function App() {
           const failedKey = activeKeys[currentKeyIndex];
           setErrorApiKeys(prev => [...new Set([...prev, failedKey])]);
           
-          const errorMessage = error instanceof Error ? error.message : String(error);
+          const errorMessage = getErrorMessage(error);
           if (errorMessage.includes("API_KEY_INVALID") || errorMessage.includes("403") || errorMessage.includes("401")) {
             addToast(`API Key tidak valid: ${failedKey.substring(0, 8)}...`, "error");
           } else {
