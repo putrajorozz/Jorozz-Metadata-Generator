@@ -3,15 +3,11 @@ import { useDropzone } from 'react-dropzone';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Upload, 
-  Image as ImageIcon, 
   Trash2, 
   Download, 
   Sparkles, 
   CheckCircle2, 
   Loader2,
-  FileText,
-  ChevronRight,
-  ChevronLeft,
   X,
   Copy,
   Check,
@@ -21,82 +17,40 @@ import {
   Info,
   Menu,
   Settings,
-  Edit3,
   History,
   ChevronDown,
   ChevronUp,
-  BarChart2,
-  Database,
+  Star,
   Eye,
   EyeOff,
-  Star
+  Edit3,
+  Search,
+  Image as ImageIcon,
+  FileText,
+  MoreVertical
 } from 'lucide-react';
 import { GoogleGenAI, Type } from "@google/genai";
 import { cn } from './lib/utils';
 
-const CHANGELOG_DATA = [
-  {
-    id: "v1.2.0",
-    date: "7 April 2026",
-    title: "Update UI & Export Options",
-    changes: [
-      { type: "new", text: "Halaman Informasi & Changelog dengan riwayat versi (buka/tutup)." },
-      { type: "new", text: "Pilihan cakupan ekspor (Download Semua Gambar vs Gambar Terpilih Saja)." },
-      { type: "improvement", text: "UI pemilihan ekstensi file (.eps, .jpg, .png) diubah menjadi tombol inline agar lebih mudah diklik." }
-    ]
-  },
-  {
-    id: "v1.1.0",
-    date: "6 April 2026",
-    title: "Metadata Editor & Multi API Key",
-    changes: [
-      { type: "improvement", text: "Pengaturan batas minimal kata untuk Judul (5-20 kata)." },
-      { type: "new", text: "Edit metadata (Judul, Deskripsi, Kata Kunci) secara manual sebelum diunduh." },
-      { type: "new", text: "Rotasi Multi API Key untuk mencegah limit (Rate Limit)." }
-    ]
-  }
-];
+// Import new components
+import { Sidebar } from './components/Sidebar';
+import { TopHeader } from './components/TopHeader';
+import { AssetGrid } from './components/AssetGrid';
+import { MetadataPanel } from './components/MetadataPanel';
+import { PngTreeVault } from './components/PngTreeVault';
 
-interface ImageData {
-  id: string;
-  file: File;
-  preview: string;
-  status: 'pending' | 'processing' | 'completed' | 'error';
-  isAiGenerated: boolean;
-  metadata?: {
-    title: string;
-    description: string;
-    keywords: string[];
-    categories: string[];
-    adobeCategory: string;
-    prompt: string;
-    model: string;
-    usedModel: string;
-    usedApiKey: string;
-  };
-  error?: string;
-}
-
-interface Toast {
-  id: string;
-  message: string;
-  type: 'success' | 'error' | 'info';
-}
-
-const MODELS = [
-  { id: "gemini-pro-latest", name: "Gemini Pro Latest", description: "Model Pro terbaru, kemampuan penalaran kuat" },
-  { id: "gemini-flash-latest", name: "Gemini Flash Latest", description: "Model Flash terbaru, efisien & cepat" },
-  { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", description: "Model terbaru, sangat cepat & akurat" },
-  { id: "gemini-2.5-flash-lite", name: "Gemini 2.5 Flash Lite", description: "Versi ringan Gemini 2.5 Flash" },
-  { id: "gemini-2.0-flash", name: "Gemini 2.0 Flash", description: "Model Gemini 2.0 Flash handal" },
-  { id: "gemini-2.0-flash-lite", name: "Gemini 2.0 Flash Lite", description: "Versi ringan Gemini 2.0 Flash" },
-  { id: "gemini-3.1-flash-lite-preview", name: "Gemini 3.1 Flash Lite (Free Tier)", description: "Paling hemat kuota & cepat" },
-  { id: "gemini-3-flash-preview", name: "Gemini 3 Flash (Free Tier)", description: "Keseimbangan kualitas & kecepatan" },
-];
+// Import constants and types
+import { MODELS, CHANGELOG_DATA } from './constants';
+import { ImageData, PngTreeMetadata, Toast } from './types';
 
 export default function App() {
   const [images, setImages] = useState<ImageData[]>([]);
+  const [pngTreeAssets, setPngTreeAssets] = useState<ImageData[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedPngTreeId, setSelectedPngTreeId] = useState<string | null>(null);
+  const [pngTreeTitleLength, setPngTreeTitleLength] = useState<number>(100);
+  const [viewMode, setViewMode] = useState<'standard' | 'pngtree'>('standard');
+  const [activePage, setActivePage] = useState<'dashboard' | 'pngtree'>('dashboard');
   const [isGenerating, setIsGenerating] = useState(false);
   const [progress, setProgress] = useState(0);
   const [copiedField, setCopiedField] = useState<string | null>(null);
@@ -148,6 +102,7 @@ export default function App() {
   }>({ isOpen: false, title: '', message: '', onConfirm: () => {} });
   const [newKey, setNewKey] = useState('');
   const [toasts, setToasts] = useState<Toast[]>([]);
+  
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState<{ title: string; description: string; keywords: string } | null>(null);
   const [expandedLogs, setExpandedLogs] = useState<string[]>([CHANGELOG_DATA[0].id]);
@@ -272,34 +227,121 @@ export default function App() {
     setTimeout(() => setCopiedField(null), 2000);
   };
 
+  const getFileHash = async (file: File): Promise<string> => {
+    const buffer = await file.arrayBuffer();
+    const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  };
+
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     setIsUploading(true);
+    let duplicateCount = 0;
     try {
       const newImages: ImageData[] = [];
+      
+      // Get current hashes
+      const existingHashes = new Set(images.map(img => img.hash).filter(Boolean));
+
       for (const file of acceptedFiles) {
-        // Use resized Blob URL instead of DataURL (Base64) to save memory
+        const hash = await getFileHash(file);
+        
+        if (existingHashes.has(hash)) {
+          duplicateCount++;
+          continue;
+        }
+
         const blobUrl = await processImage(file);
         newImages.push({
           id: Math.random().toString(36).substring(7),
           file,
           preview: blobUrl,
+          hash,
           status: 'pending' as const,
           isAiGenerated: false,
         });
+        existingHashes.add(hash);
       }
-      setImages(prev => [...prev, ...newImages]);
+
+      if (duplicateCount > 0) {
+        addToast(`${duplicateCount} gambar duplikat dilewati`, "info");
+      }
+
       if (newImages.length > 0) {
+        setImages(prev => [...prev, ...newImages]);
         setSelectedId(newImages[0].id);
       }
     } catch (err) {
       console.error("Error creating previews", err);
+      addToast("Gagal memproses beberapa gambar", "error");
     } finally {
       setIsUploading(false);
     }
-  }, [selectedId]);
+  }, [images]);
+
+  const onPngTreeDrop = useCallback(async (acceptedFiles: File[]) => {
+    setIsUploading(true);
+    let duplicateCount = 0;
+    try {
+      const newAssets: ImageData[] = [];
+      
+      // Get current hashes
+      const existingHashes = new Set(pngTreeAssets.map(img => img.hash).filter(Boolean));
+
+      for (const file of acceptedFiles) {
+        const hash = await getFileHash(file);
+        
+        if (existingHashes.has(hash)) {
+          duplicateCount++;
+          continue;
+        }
+
+        const blobUrl = await processImage(file);
+        newAssets.push({
+          id: Math.random().toString(36).substring(7),
+          file,
+          preview: blobUrl,
+          hash,
+          status: 'pending' as const,
+          isAiGenerated: false,
+        });
+        existingHashes.add(hash);
+      }
+
+      if (duplicateCount > 0) {
+        addToast(`${duplicateCount} gambar duplikat dilewati`, "info");
+      }
+
+      if (newAssets.length > 0) {
+        setPngTreeAssets(prev => [...prev, ...newAssets]);
+        setSelectedPngTreeId(newAssets[0].id);
+      }
+    } catch (err) {
+      console.error("Error creating PNGTree previews", err);
+      addToast("Gagal memproses beberapa gambar PNGTree", "error");
+    } finally {
+      setIsUploading(false);
+    }
+  }, [pngTreeAssets]);
 
   const { getRootProps, getInputProps, isDragActive, open } = useDropzone({
     onDrop,
+    accept: { 
+      'image/jpeg': ['.jpg', '.jpeg'],
+      'image/png': ['.png'],
+      'image/svg+xml': ['.svg']
+    },
+    multiple: true,
+    noClick: true
+  });
+
+  const { 
+    getRootProps: getPngTreeRootProps, 
+    getInputProps: getPngTreeInputProps, 
+    isDragActive: isPngTreeDragActive, 
+    open: openPngTree 
+  } = useDropzone({
+    onDrop: onPngTreeDrop,
     accept: { 
       'image/jpeg': ['.jpg', '.jpeg'],
       'image/png': ['.png'],
@@ -369,6 +411,137 @@ export default function App() {
     images.find(img => img.id === selectedId), 
   [images, selectedId]);
 
+  const selectedPngTreeAsset = useMemo(() => 
+    pngTreeAssets.find(a => a.id === selectedPngTreeId),
+    [pngTreeAssets, selectedPngTreeId]
+  );
+
+  const generatePngTreeMetadata = async () => {
+    if (pngTreeAssets.length === 0 || isGenerating) return;
+
+    if (apiKeys.length === 0) {
+      addToast("Silakan masukkan API Key Anda terlebih dahulu", "error");
+      setShowKeyModal(true);
+      return;
+    }
+
+    setIsGenerating(true);
+    setProgress(0);
+
+    const pendingAssets = pngTreeAssets.filter(img => img.status !== 'completed');
+    let completedCount = 0;
+    let currentKeyIndex = 0;
+
+    for (const img of pendingAssets) {
+      setSelectedPngTreeId(img.id);
+      setPngTreeAssets(prev => prev.map(i => 
+        i.id === img.id ? { ...i, status: 'processing' } : i
+      ));
+
+      let success = false;
+      let modelIndex = favoriteModelId 
+        ? MODELS.findIndex(m => m.id === favoriteModelId) 
+        : MODELS.findIndex(m => m.id === selectedModel);
+      if (modelIndex === -1) modelIndex = 0;
+      
+      let modelsTried = 0;
+      const totalModels = MODELS.length;
+
+      while (!success && modelsTried < totalModels) {
+        const currentModelId = MODELS[modelIndex].id;
+        let retryCount = 0;
+        const maxRetries = apiKeys.length;
+
+        while (!success && retryCount < maxRetries) {
+          const currentKey = apiKeys[currentKeyIndex];
+          setActiveApiKey(currentKey);
+          const ai = new GoogleGenAI({ apiKey: currentKey });
+
+          try {
+            const reader = new FileReader();
+            const base64Data = await new Promise<string>((resolve, reject) => {
+              reader.onload = () => resolve((reader.result as string).split(",")[1]);
+              reader.onerror = () => reject(new Error("Gagal membaca file"));
+              reader.readAsDataURL(img.file);
+            });
+
+            const promptText = `Analyze this image for PNGTree metadata. 
+                    Generate the following in JSON format:
+                    - title: A descriptive title (${pngTreeTitleLength - 20}-${pngTreeTitleLength} characters). For isolated objects with transparency, specify the object name and "isolated" in title.
+                    - pngTreeMainKeywords: Exactly 3 most relevant keywords.
+                    - pngTreeSecondaryKeywords: Exactly 20 relevant keywords (elements, style, colors). Include "transparent", "png", "isolated" if applicable.
+                    - pngTreeMainCopy: Primary text content in the image OR Indonesian language description if it is a local theme. 
+                    
+                    Everything except mainCopy must be in English.`;
+            
+            const response = await ai.models.generateContent({
+              model: currentModelId,
+              contents: {
+                parts: [
+                  { inlineData: { mimeType: img.file.type || "image/jpeg", data: base64Data } },
+                  { text: promptText },
+                ],
+              },
+              config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                  type: Type.OBJECT,
+                  properties: {
+                    title: { type: Type.STRING },
+                    pngTreeMainKeywords: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    pngTreeSecondaryKeywords: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    pngTreeMainCopy: { type: Type.STRING }
+                  },
+                  required: ["title", "pngTreeMainKeywords", "pngTreeSecondaryKeywords", "pngTreeMainCopy"]
+                }
+              }
+            });
+
+            const result = JSON.parse(response.text || "{}");
+            
+            const updatedMetadata = {
+              title: result.title,
+              description: result.title,
+              keywords: [...result.pngTreeMainKeywords, ...result.pngTreeSecondaryKeywords].slice(0, 50),
+              categories: ["Backgrounds/Textures", "Travel"],
+              adobeCategory: "Graphic Resources",
+              prompt: promptText,
+              model: currentModelId,
+              usedModel: MODELS[modelIndex].name,
+              usedApiKey: currentKey.slice(-4),
+              pngTree: {
+                title: result.title,
+                mainKeywords: result.pngTreeMainKeywords,
+                secondaryKeywords: result.pngTreeSecondaryKeywords,
+                mainCopy: result.pngTreeMainCopy
+              }
+            };
+
+            setPngTreeAssets(prev => prev.map(i => i.id === img.id ? { ...i, status: 'completed', metadata: updatedMetadata } : i));
+            success = true;
+            setActiveApiKey(null);
+            addToast(`PNGTree: ${img.file.name} Berhasil`, "success");
+            currentKeyIndex = (currentKeyIndex + 1) % apiKeys.length;
+          } catch (error) {
+            currentKeyIndex = (currentKeyIndex + 1) % apiKeys.length;
+            retryCount++;
+          }
+        }
+        if (!success) {
+          modelIndex = (modelIndex + 1) % MODELS.length;
+          modelsTried++;
+        }
+      }
+      if (!success) {
+        setPngTreeAssets(prev => prev.map(i => i.id === img.id ? { ...i, status: 'error', error: "Gagal memproses" } : i));
+      }
+      completedCount++;
+      setProgress((completedCount / pendingAssets.length) * 100);
+    }
+    setIsGenerating(false);
+    setActiveApiKey(null);
+  };
+
   const generateMetadata = async () => {
     if (images.length === 0 || isGenerating) return;
 
@@ -425,7 +598,7 @@ export default function App() {
             });
             let mimeType = img.file.type || "image/jpeg";
             
-            const promptText = `Analyze this image for microstock metadata (Shutterstock, Adobe Stock, etc.). 
+            const promptText = `Analyze this image for microstock metadata (Shutterstock, Adobe Stock, PNGTree, etc.). 
                     Generate the following in JSON format:
                     - title: A catchy, descriptive title focusing on the main subject (approximately ${titleLength} characters long).
                     - description: A detailed, SEO-friendly description including context, mood, and key elements (10-20 words).
@@ -433,7 +606,12 @@ export default function App() {
                     - categories: Select exactly 2 most relevant categories from this list: [Abstract, Animals/Wildlife, Arts, Backgrounds/Textures, Beauty/Fashion, Buildings/Landmarks, Business/Finance, Celebrities, Education, Food and drink, Healthcare/Medical, Holidays, Industrial, Interiors, Miscellaneous, Nature, Objects, Parks/Outdoor, People, Religion, Science, Signs/Symbols, Sports/Recreation, Technology, Transportation, Vintage].
                     - adobeCategory: Select exactly 1 most relevant category from this list: [Animals, Buildings And Architecture, Business, Drinks, The Environment, States of Mind, Food, Graphic Resources, Hobbies and Leisure, Industry, Landscapes, Lifestyle, People, Plants and Flowers, Culture and Religion, Science, Social Issues, Sports, Technology, Transport, Travel].
                     
-                    All metadata must be in English.`;
+                    Specifically for PNGTree:
+                    - pngTreeMainKeywords: Exactly 3 keywords that are most relevant to the work.
+                    - pngTreeSecondaryKeywords: Exactly 30-50 keywords related to the work (style, color, elements, etc.).
+                    - pngTreeMainCopy: The primary text information contained in the work, or non-English words related to the image (Indonesian, etc.).
+                    
+                    All metadata must be in English unless specified for pngTreeMainCopy.`;
             
             const response = await ai.models.generateContent({
               model: currentModelId,
@@ -469,9 +647,18 @@ export default function App() {
                     adobeCategory: {
                       type: Type.STRING,
                       description: "Exactly 1 category from the Adobe Stock list"
-                    }
+                    },
+                    pngTreeMainKeywords: {
+                      type: Type.ARRAY,
+                      items: { type: Type.STRING }
+                    },
+                    pngTreeSecondaryKeywords: {
+                      type: Type.ARRAY,
+                      items: { type: Type.STRING }
+                    },
+                    pngTreeMainCopy: { type: Type.STRING }
                   },
-                  required: ["title", "description", "keywords", "categories", "adobeCategory"]
+                  required: ["title", "description", "keywords", "categories", "adobeCategory", "pngTreeMainKeywords", "pngTreeSecondaryKeywords", "pngTreeMainCopy"]
                 }
               }
             });
@@ -487,7 +674,13 @@ export default function App() {
               prompt: promptText,
               model: currentModelId,
               usedModel: MODELS[modelIndex].name,
-              usedApiKey: currentKey.slice(-4)
+              usedApiKey: currentKey.slice(-4),
+              pngTree: {
+                title: result.title,
+                mainKeywords: result.pngTreeMainKeywords,
+                secondaryKeywords: result.pngTreeSecondaryKeywords,
+                mainCopy: result.pngTreeMainCopy
+              }
             };
 
             const updatedImage = { 
@@ -595,7 +788,7 @@ export default function App() {
           });
           let mimeType = img.file.type || "image/jpeg";
           
-          const promptText = `Analyze this image for microstock metadata (Shutterstock, Adobe Stock, etc.). 
+          const promptText = `Analyze this image for microstock metadata (Shutterstock, Adobe Stock, PNGTree, etc.). 
                   Generate the following in JSON format:
                   - title: A catchy, descriptive title focusing on the main subject (approximately ${titleLength} characters long).
                   - description: A detailed, SEO-friendly description including context, mood, and key elements (10-20 words).
@@ -603,7 +796,12 @@ export default function App() {
                   - categories: Select exactly 2 most relevant categories from this list: [Abstract, Animals/Wildlife, Arts, Backgrounds/Textures, Beauty/Fashion, Buildings/Landmarks, Business/Finance, Celebrities, Education, Food and drink, Healthcare/Medical, Holidays, Industrial, Interiors, Miscellaneous, Nature, Objects, Parks/Outdoor, People, Religion, Science, Signs/Symbols, Sports/Recreation, Technology, Transportation, Vintage].
                   - adobeCategory: Select exactly 1 most relevant category from this list: [Animals, Buildings And Architecture, Business, Drinks, The Environment, States of Mind, Food, Graphic Resources, Hobbies and Leisure, Industry, Landscapes, Lifestyle, People, Plants and Flowers, Culture and Religion, Science, Social Issues, Sports, Technology, Transport, Travel].
                   
-                  All metadata must be in English.`;
+                  Specifically for PNGTree:
+                  - pngTreeMainKeywords: Exactly 3 keywords that are most relevant to the work.
+                  - pngTreeSecondaryKeywords: Exactly 30-50 keywords related to the work (style, color, elements, etc.).
+                  - pngTreeMainCopy: The primary text information contained in the work, or non-English words related to the image (Indonesian, etc.).
+                  
+                  All metadata must be in English unless specified for pngTreeMainCopy.`;
           
           const response = await ai.models.generateContent({
             model: currentModelId,
@@ -632,9 +830,18 @@ export default function App() {
                   adobeCategory: {
                     type: Type.STRING,
                     description: "Exactly 1 category from the Adobe Stock list"
-                  }
+                  },
+                  pngTreeMainKeywords: {
+                    type: Type.ARRAY,
+                    items: { type: Type.STRING }
+                  },
+                  pngTreeSecondaryKeywords: {
+                    type: Type.ARRAY,
+                    items: { type: Type.STRING }
+                  },
+                  pngTreeMainCopy: { type: Type.STRING }
                 },
-                required: ["title", "description", "keywords", "categories", "adobeCategory"]
+                required: ["title", "description", "keywords", "categories", "adobeCategory", "pngTreeMainKeywords", "pngTreeSecondaryKeywords", "pngTreeMainCopy"]
               }
             }
           });
@@ -654,7 +861,13 @@ export default function App() {
             prompt: promptText,
             model: currentModelId,
             usedModel: MODELS[modelIndex].name,
-            usedApiKey: currentKey.slice(-4)
+            usedApiKey: currentKey.slice(-4),
+            pngTree: {
+              title: result.title,
+              mainKeywords: result.pngTreeMainKeywords,
+              secondaryKeywords: result.pngTreeSecondaryKeywords,
+              mainCopy: result.pngTreeMainCopy
+            }
           };
 
           const updatedImage = { 
@@ -853,6 +1066,14 @@ export default function App() {
       <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-purple-200/40 blur-[120px] rounded-full pointer-events-none" />
 
       <div className="flex h-screen relative z-10 overflow-hidden">
+        <Sidebar 
+          activePage={activePage} 
+          setActivePage={setActivePage} 
+          setShowSettings={setShowSettings} 
+          open={open} 
+          openPngTree={openPngTree} 
+        />
+
         {/* Main Content */}
         <main 
           {...getRootProps()}
@@ -860,8 +1081,17 @@ export default function App() {
         >
           <input {...getInputProps()} />
           
-          {/* Drag & Drop Overlay */}
-          <AnimatePresence>
+          <AnimatePresence mode="wait">
+            {activePage === 'dashboard' ? (
+              <motion.div 
+                key="dashboard"
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 10 }}
+                className="flex-1 flex flex-col overflow-hidden"
+              >
+                {/* Drag & Drop Overlay */}
+                <AnimatePresence>
             {isDragActive && !isUploading && (
               <motion.div 
                 initial={{ opacity: 0 }}
@@ -894,105 +1124,19 @@ export default function App() {
             )}
           </AnimatePresence>
 
-          {/* Main Header (Responsive) */}
-          <header className="p-4 border-b border-slate-200 bg-white/60 backdrop-blur-md flex items-center justify-between sticky top-0 z-30">
-            <div className="flex items-center gap-4">
-              <h1 className="text-sm md:text-lg font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent flex items-center gap-2">
-                <Sparkles className="w-4 h-4 md:w-5 md:h-5 text-indigo-600" />
-                <span className="hidden xs:inline">Jorozz Generator</span>
-              </h1>
-              <div className="h-4 w-px bg-slate-200 hidden xs:block" />
-              <h2 className="text-xs md:text-sm font-medium text-slate-500 truncate max-w-[120px] sm:max-w-[200px]">
-                Metadata Generator
-              </h2>
-            </div>
-            
-            <div className="flex items-center gap-2">
-              <div className="relative" ref={modelDropdownRef}>
-                <button
-                  onClick={() => setShowModelDropdown(!showModelDropdown)}
-                  className="px-3 py-2 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 rounded-xl text-[10px] font-bold flex items-center gap-2 transition-all"
-                  title="Pilih Model Gemini"
-                >
-                  <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
-                  <span className="max-w-[100px] truncate">
-                    {MODELS.find(m => m.id === selectedModel)?.name.split(' (')[0]}
-                  </span>
-                  <ChevronRight className={cn("w-3 h-3 transition-transform", showModelDropdown && "rotate-90")} />
-                </button>
-
-                <AnimatePresence>
-                  {showModelDropdown && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                      className="absolute left-0 mt-2 w-56 bg-white rounded-2xl border border-slate-200 shadow-xl z-50 overflow-hidden"
-                    >
-                      <div className="p-2 border-b border-slate-100 bg-slate-50/50">
-                        <span className="text-[9px] uppercase tracking-wider text-slate-400 font-bold px-2">Pilih Model Gemini</span>
-                      </div>
-                      {MODELS.map((m) => (
-                        <button
-                          key={m.id}
-                          onClick={() => {
-                            setSelectedModel(m.id);
-                            setShowModelDropdown(false);
-                          }}
-                          className={cn(
-                            "w-full px-4 py-3 text-left transition-colors flex items-center justify-between gap-2",
-                            selectedModel === m.id
-                              ? "bg-indigo-50 text-indigo-600"
-                              : "text-slate-600 hover:bg-slate-50"
-                          )}
-                        >
-                          <div className="flex flex-col gap-0.5">
-                            <span className="text-[11px] font-bold">{m.name}</span>
-                            <span className="text-[9px] text-slate-400 leading-tight">{m.description}</span>
-                          </div>
-                          <div 
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setFavoriteModelId(favoriteModelId === m.id ? null : m.id);
-                            }}
-                            className="p-1 hover:bg-slate-200 rounded-full cursor-pointer"
-                          >
-                            <Star className={cn("w-3.5 h-3.5", favoriteModelId === m.id ? "text-yellow-500 fill-current" : "text-slate-300")} />
-                          </div>
-                        </button>
-                      ))}
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
-              
-              <button 
-                onClick={() => setShowKeyModal(true)}
-                className="p-2 hover:bg-slate-100 rounded-xl text-slate-500 transition-colors relative"
-                title="Manage API Keys"
-              >
-                <Key className="w-4 h-4" />
-                {apiKeys.length > 0 && (
-                  <span className="absolute top-1 right-1 w-2 h-2 bg-indigo-500 rounded-full border border-white" />
-                )}
-              </button>
-              <button 
-                onClick={() => setShowInfoPage(true)}
-                className="p-2 hover:bg-slate-100 rounded-xl text-slate-500 transition-colors"
-                title="Informasi Website"
-              >
-                <Info className="w-4 h-4" />
-              </button>
-              <button 
-                onClick={open}
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-lg shadow-indigo-100 active:scale-95"
-              >
-                <Plus className="w-4 h-4" />
-                <span className="hidden xs:inline">Upload Gambar</span>
-                <span className="xs:hidden">Upload</span>
-              </button>
-            </div>
-          </header>
+          <TopHeader 
+            selectedModel={selectedModel}
+            setSelectedModel={setSelectedModel}
+            setShowKeyModal={setShowKeyModal}
+            setShowInfoPage={setShowInfoPage}
+            open={open}
+            apiKeys={apiKeys}
+            favoriteModelId={favoriteModelId}
+            setFavoriteModelId={setFavoriteModelId}
+            showModelDropdown={showModelDropdown}
+            setShowModelDropdown={setShowModelDropdown}
+            modelDropdownRef={modelDropdownRef}
+          />
 
           {/* Progress Bar */}
           <AnimatePresence>
@@ -1020,568 +1164,98 @@ export default function App() {
             )}
           </AnimatePresence>
 
-          <div className="flex-1 overflow-y-auto p-4 sm:p-8 custom-scrollbar">
-            <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-8 max-w-[1600px] mx-auto">
+          <div className="flex-1 overflow-y-auto p-4 sm:p-8 custom-scrollbar pb-24 md:pb-8">
+            <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-6 lg:gap-8 max-w-[1600px] mx-auto">
               
-              {/* Left Column: Input and List */}
-              <div className="space-y-6">
-                {/* Persistent Upload Area */}
-                <div 
-                  onClick={open}
-                  className={cn(
-                    "p-6 border-2 border-dashed rounded-3xl transition-all cursor-pointer group flex flex-col items-center justify-center text-center",
-                    isDragActive 
-                      ? "border-indigo-400 bg-indigo-50/50" 
-                      : "border-slate-200 bg-white/40 hover:bg-white/60 hover:border-slate-300"
-                  )}
-                >
-                  <div className="w-10 h-10 rounded-2xl bg-indigo-50 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
-                    <Upload className="w-5 h-5 text-indigo-500" />
-                  </div>
-                  <h4 className="text-sm font-bold text-slate-800">Tambahkan Gambar</h4>
-                  <p className="text-[10px] text-slate-500 mt-0.5">Seret atau klik untuk upload</p>
-                </div>
+                <AssetGrid 
+                  images={images}
+                  selectedId={selectedId}
+                  setSelectedId={setSelectedId}
+                  setImages={setImages}
+                  isDragActive={isDragActive}
+                  open={open}
+                  showSettingsPanel={showSettingsPanel}
+                  setShowSettingsPanel={setShowSettingsPanel}
+                  titleLength={titleLength}
+                  setTitleLength={setTitleLength}
+                  keywordCount={keywordCount}
+                  setKeywordCount={setKeywordCount}
+                  generateMetadata={generateMetadata}
+                  isGenerating={isGenerating}
+                />
 
-                {/* Grid Image Gallery */}
-                {images.length > 0 && (
-                  <div className="bg-white/40 backdrop-blur-md rounded-3xl border border-slate-200 p-4 sm:p-6 space-y-4">
-                    <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">Daftar Gambar ({images.length})</h3>
-                    <div className="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-4 xl:grid-cols-5 gap-2.5">
-                      {images.map((img) => (
-                        <div
-                          key={img.id}
-                          id={`image-item-${img.id}`}
-                          className={cn(
-                            "group relative aspect-square rounded-xl overflow-hidden border-2 transition-all cursor-pointer shadow-sm",
-                            selectedId === img.id ? "border-indigo-500 ring-4 ring-indigo-50 scale-105 z-10" : "border-white bg-white/50 hover:border-indigo-200"
-                          )}
-                          onClick={() => setSelectedId(img.id)}
-                        >
-                          {img.file.type.startsWith('image/') ? (
-                            <img src={img.preview} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                          ) : (
-                            <div className="w-full h-full bg-slate-50 flex items-center justify-center text-slate-300">
-                              <FileText className="w-5 h-5" />
-                            </div>
-                          )}
-                          
-                          {/* Delete Button */}
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setImages(prev => prev.filter(i => i.id !== img.id));
-                              if (selectedId === img.id) setSelectedId(null);
-                            }}
-                            className="absolute top-1 right-1 p-1 bg-white/90 rounded-full shadow-sm text-slate-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity z-20"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                          </button>
-
-                          {/* Status Overlay */}
-                          <div className="absolute inset-x-0 bottom-0 p-1 flex justify-end pointer-events-none">
-                            {img.status === 'completed' && (
-                              <div className="w-4 h-4 bg-green-500 rounded-full flex items-center justify-center shadow-lg border-2 border-white">
-                                <Check className="w-2.5 h-2.5 text-white" />
-                              </div>
-                            )}
-                            {img.status === 'processing' && (
-                              <div className="w-4 h-4 bg-indigo-500 rounded-full flex items-center justify-center shadow-lg border-2 border-white animate-pulse">
-                                <Loader2 className="w-2.5 h-2.5 text-white animate-spin" />
-                              </div>
-                            )}
-                            {img.status === 'error' && (
-                              <div className="w-4 h-4 bg-red-500 rounded-full flex items-center justify-center shadow-lg border-2 border-white">
-                                <AlertCircle className="w-2.5 h-2.5 text-white" />
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Hover effect */}
-                          <div className={cn(
-                            "absolute inset-0 bg-indigo-600/10 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center",
-                            selectedId === img.id && "opacity-100"
-                          )} />
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="space-y-4 pt-4 border-t border-slate-100">
-                      <button 
-                        onClick={() => setShowSettingsPanel(!showSettingsPanel)}
-                        className="flex items-center justify-between w-full text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]"
-                      >
-                        Metadata Settings
-                        {showSettingsPanel ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                      </button>
-
-                      {showSettingsPanel && (
-                        <>
-                          <div className="space-y-2">
-                            <div className="flex items-center justify-between">
-                              <label className="text-xs font-bold text-slate-600">Title Length ({titleLength})</label>
-                              <button onClick={() => setTitleLength(100)} className="text-[10px] text-indigo-500 hover:text-indigo-700 font-bold">Reset</button>
-                            </div>
-                            <input 
-                              type="range"
-                              min="30"
-                              max="200"
-                              value={titleLength}
-                              onChange={(e) => setTitleLength(parseInt(e.target.value))}
-                              className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <div className="flex items-center justify-between">
-                              <label className="text-xs font-bold text-slate-600">Keywords Count ({keywordCount})</label>
-                              <button onClick={() => setKeywordCount(50)} className="text-[10px] text-indigo-500 hover:text-indigo-700 font-bold">Reset</button>
-                            </div>
-                            <input 
-                              type="range"
-                              min="5"
-                              max="50"
-                              value={keywordCount}
-                              onChange={(e) => setKeywordCount(parseInt(e.target.value))}
-                              className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
-                            />
-                          </div>
-                        </>
-                      )}
-                    </div>
-
-                    <button 
-                      onClick={generateMetadata}
-                      disabled={isGenerating || images.length === 0}
-                      className="w-full py-3 bg-indigo-600 text-white rounded-xl text-sm font-bold shadow-lg shadow-indigo-100 flex items-center justify-center gap-2 hover:bg-indigo-700 disabled:opacity-50 transition-all active:scale-[.98]"
-                    >
-                      {isGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-                      {isGenerating ? "Sedang..." : "Generate"}
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {/* Right Column: AI Generation and Detailed View */}
-              <div className="space-y-6">
-                {/* Metadata Export Hub Batch Center */}
-                {images.length > 0 && (
-                  <motion.div 
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="relative group z-20"
-                  >
-                    <div className={cn(
-                      "relative bg-white rounded-3xl border border-slate-100 shadow-xl shadow-slate-200/40 transition-all duration-300 overflow-hidden",
-                      isBatchHubCollapsed ? "p-3" : "p-4"
-                    )}>
-                      {/* Header */}
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <button 
-                            onClick={toggleBatchHub}
-                            className="w-8 h-8 rounded-xl bg-slate-50 flex items-center justify-center text-slate-400 hover:bg-indigo-50 hover:text-indigo-600 transition-colors"
-                          >
-                            <motion.div
-                              animate={{ rotate: isBatchHubCollapsed ? 0 : 180 }}
-                              transition={{ duration: 0.3 }}
-                            >
-                              <ChevronDown className="w-4 h-4" />
-                            </motion.div>
-                          </button>
-                          
-                          <div className="flex flex-col">
-                            <span className="text-[8px] font-black text-slate-300 uppercase tracking-[0.2em] leading-none mb-0.5">Metadata Export Hub</span>
-                            <h3 className="text-xs font-black text-slate-800 tracking-tight leading-none uppercase">Batch Center</h3>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-3">
-                          <div className="flex -space-x-1.5">
-                            {images.slice(0, 3).map((img) => (
-                              <img 
-                                key={img.id} 
-                                src={img.preview} 
-                                alt="" 
-                                className="w-5 h-5 rounded-lg border border-white object-cover shadow-sm bg-slate-100"
-                                referrerPolicy="no-referrer"
-                              />
-                            ))}
-                          </div>
-                          <div className="px-2 py-0.5 rounded-lg bg-indigo-50 border border-indigo-100/30">
-                            <span className="text-[9px] font-bold text-indigo-600">{images.length} File</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Collapsible Content */}
-                      <AnimatePresence>
-                        {!isBatchHubCollapsed && (
-                          <motion.div
-                            initial={{ height: 0, opacity: 0 }}
-                            animate={{ height: 'auto', opacity: 1 }}
-                            exit={{ height: 0, opacity: 0 }}
-                            className="overflow-hidden"
-                          >
-                            <div className="pt-4 grid grid-cols-1 sm:grid-cols-3 gap-2">
-                              {(['Freepik', 'Adobe', 'Shutterstock'] as const).map((platform) => {
-                                const isReady = images.length > 0 && images.every(img => img.status === 'completed');
-                                
-                                return (
-                                  <div key={platform} className="flex flex-col gap-1.5">
-                                    <button 
-                                      disabled={!isReady}
-                                      onClick={() => isReady && setExportPlatform(exportPlatform === platform ? null : platform)}
-                                      className={cn(
-                                        "relative group/btn h-9 overflow-hidden rounded-xl border transition-all duration-200 flex items-center justify-center gap-2 active:scale-95",
-                                        !isReady 
-                                          ? "bg-slate-50 border-slate-100 text-slate-200 cursor-not-allowed"
-                                          : exportPlatform === platform
-                                            ? "bg-indigo-600 border-indigo-500 text-white shadow-md shadow-indigo-100/50"
-                                            : "bg-white border-slate-100 text-slate-700 hover:border-indigo-200 hover:bg-slate-50"
-                                      )}
-                                    >
-                                      {isReady && <Download className={cn("w-3 h-3 transition-colors", exportPlatform === platform ? "text-white" : "text-slate-400")} />}
-                                      <span className="text-[10px] font-black tracking-tight">{platform.toUpperCase()}</span>
-                                    </button>
-
-                                    <AnimatePresence>
-                                      {isReady && exportPlatform === platform && (
-                                        <motion.div 
-                                          initial={{ opacity: 0, height: 0 }}
-                                          animate={{ opacity: 1, height: 'auto' }}
-                                          exit={{ opacity: 0, height: 0 }}
-                                          className="flex gap-1 overflow-hidden"
-                                        >
-                                          {(['.eps', '.jpg', '.png'] as const).map((ext) => (
-                                            <button
-                                              key={ext}
-                                              onClick={() => {
-                                                setExportExtension(ext);
-                                                if (platform === 'Freepik') downloadCSV();
-                                                else if (platform === 'Adobe') downloadAdobeStockCSV();
-                                                else downloadShutterstockCSV();
-                                                addToast(`Batch Export: ${platform} (${ext})`, "success");
-                                              }}
-                                              className="flex-1 py-1.5 rounded-lg text-[8px] font-black bg-slate-50 text-slate-500 border border-slate-100 hover:bg-indigo-600 hover:text-white transition-all"
-                                            >
-                                              {ext.toUpperCase().replace('.', '')}
-                                            </button>
-                                          ))}
-                                        </motion.div>
-                                      )}
-                                    </AnimatePresence>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                            
-                            {!images.every(img => img.status === 'completed') && (
-                              <div className="mt-3 p-2 rounded-xl bg-amber-50 border border-amber-100/50 flex items-center gap-2">
-                                <div className="w-6 h-6 rounded-lg bg-white flex items-center justify-center shadow-xs">
-                                  <Database className="w-3 h-3 text-amber-500 animate-pulse" />
-                                </div>
-                                <span className="text-[9px] font-bold text-amber-700 leading-none">Menunggu Sinkronisasi Aset...</span>
-                              </div>
-                            )}
-
-                            <div className="mt-3 pt-2 border-t border-slate-50 flex items-center justify-between opacity-30">
-                              <span className="text-[7px] font-black text-slate-300 uppercase tracking-widest leading-none">v2.5 Hub Engine</span>
-                              <div className="flex gap-1">
-                                <div className="w-1 h-1 rounded-full bg-slate-200"></div>
-                                <div className="w-1 h-1 rounded-full bg-slate-200"></div>
-                              </div>
-                            </div>
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
-                    </div>
-                  </motion.div>
-                )}
-
-                
-                {/* Result/Detail Area */}
-                {selectedImage ? (
-                  <motion.div 
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="bg-white/40 backdrop-blur-md rounded-3xl border border-slate-200 p-4 shadow-sm overflow-hidden"
-                  >
-                    {/* Metadata Header */}
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="flex items-center gap-4">
-                        <div className="w-16 h-16 rounded-2xl overflow-hidden border border-slate-200 shadow-sm bg-white">
-                          {selectedImage.file.type.startsWith('image/') ? (
-                            <img src={selectedImage.preview} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center text-slate-400 bg-slate-50">
-                              <FileText className="w-8 h-8" />
-                            </div>
-                          )}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <h2 className="text-lg font-bold text-slate-800 line-clamp-1">{selectedImage.file.name}</h2>
-                          <div className="flex items-center gap-3 mt-1">
-                            <span className={cn(
-                              "text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider",
-                              selectedImage.status === 'completed' ? "bg-green-100 text-green-600" :
-                              selectedImage.status === 'error' ? "bg-red-100 text-red-600" :
-                              "bg-indigo-100 text-indigo-600"
-                            )}>
-                              {selectedId === 'completed' ? 'Selesai' : selectedImage.status}
-                            </span>
-                            
-                            <label className="flex items-center gap-1.5 cursor-pointer group">
-                              <div className="relative">
-                                <input 
-                                  type="checkbox" 
-                                  className="sr-only" 
-                                  checked={selectedImage.isAiGenerated}
-                                  onChange={(e) => {
-                                    const checked = e.target.checked;
-                                    setImages(prev => prev.map(img => 
-                                      img.id === selectedImage.id ? { ...img, isAiGenerated: checked } : img
-                                    ));
-                                  }}
-                                />
-                                <div className={cn(
-                                  "w-7 h-4 rounded-full transition-colors",
-                                  selectedImage.isAiGenerated ? "bg-indigo-500" : "bg-slate-300"
-                                )} />
-                                <div className={cn(
-                                  "absolute top-0.5 left-0.5 w-3 h-3 bg-white rounded-full transition-transform shadow-sm",
-                                  selectedImage.isAiGenerated ? "translate-x-3" : "translate-x-0"
-                                )} />
-                              </div>
-                              <span className="text-[10px] font-bold text-slate-500 group-hover:text-indigo-600 transition-colors">AI Generated</span>
-                            </label>
-                          </div>
-                        </div>
-                      </div>
-                      
-                      <div className="flex gap-2">
-                        {selectedImage.status !== 'processing' && (
-                          <button
-                            onClick={() => regenerateSingleMetadata(selectedImage.id)}
-                            disabled={isGenerating}
-                            className="p-2 border rounded-xl transition-all flex items-center gap-2 text-xs font-bold shadow-sm bg-white hover:bg-indigo-50 border-slate-200 text-indigo-600"
-                            title="Regenerate"
-                          >
-                            <Sparkles className="w-4 h-4" />
-                          </button>
-                        )}
-                        {!isEditing && selectedImage.status === 'completed' && (
-                          <button onClick={startEditing} className="p-2 bg-white border border-slate-200 text-slate-500 hover:text-indigo-600 rounded-xl transition-colors shadow-sm">
-                            <Edit3 className="w-4 h-4" />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Content Section */}
-                    <div className="space-y-6">
-                      {selectedImage.status === 'completed' && (
-                        <div className="space-y-6">
-                          {/* Metadata Download Menu */}
-                          <div className="flex flex-col gap-2" ref={singleDropdownRef}>
-                            <AnimatePresence mode="wait">
-                              {activeDownloadMenu && activeDownloadMenu.targetImages?.[0]?.id === selectedImage.id ? (
-                                <motion.div
-                                  initial={{ opacity: 0, y: -10 }}
-                                  animate={{ opacity: 1, y: 0 }}
-                                  exit={{ opacity: 0, y: -10 }}
-                                  className="w-full p-4 bg-white rounded-2xl border border-slate-100 flex flex-col gap-4 shadow-xl shadow-indigo-100/20"
-                                >
-                                  <div className="flex items-center justify-between">
-                                    <span className="text-sm font-bold text-slate-700">Format File ({activeDownloadMenu.type === 'adobe' ? 'Adobe Store' : 'Shutterstock'})</span>
-                                    <button onClick={() => setActiveDownloadMenu(null)} className="p-1.5 text-slate-400 hover:bg-slate-100 rounded-lg">
-                                      <X className="w-4 h-4" />
-                                    </button>
-                                  </div>
-                                  <div className="flex gap-2">
-                                    {(['.eps', '.jpg', '.png'] as const).map((ext) => (
-                                      <button
-                                        key={ext}
-                                        onClick={() => setExportExtension(ext)}
-                                        className={cn(
-                                          "flex-1 py-2.5 rounded-xl text-sm font-bold transition-all border",
-                                          exportExtension === ext
-                                            ? "bg-indigo-50 border-indigo-200 text-indigo-700"
-                                            : "bg-white border-slate-100 text-slate-500 hover:bg-slate-50"
-                                        )}
-                                      >
-                                        {ext}
-                                      </button>
-                                    ))}
-                                  </div>
-                                  <button
-                                    onClick={() => {
-                                      if (activeDownloadMenu.type === 'adobe') downloadAdobeStockCSV([selectedImage]);
-                                      else downloadShutterstockCSV([selectedImage]);
-                                      setActiveDownloadMenu(null);
-                                    }}
-                                    className="w-full py-3 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 flex items-center justify-center gap-2"
-                                  >
-                                    <Download className="w-4 h-4" />
-                                    Download CSV
-                                  </button>
-                                </motion.div>
-                              ) : (
-                                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-wrap gap-2">
-                                  <button
-                                    onClick={() => downloadCSV([selectedImage])}
-                                    className="px-4 py-2.5 bg-white border border-slate-200 text-indigo-600 rounded-xl text-xs font-bold shadow-sm hover:bg-slate-50 flex items-center gap-2"
-                                  >
-                                    <Download className="w-4 h-4" /> Freepik
-                                  </button>
-                                  <button
-                                    onClick={() => setActiveDownloadMenu({ type: 'adobe', targetImages: [selectedImage] })}
-                                    className="px-4 py-2.5 bg-white border border-slate-200 text-indigo-600 rounded-xl text-xs font-bold shadow-sm hover:bg-slate-50 flex items-center gap-2"
-                                  >
-                                    <Download className="w-4 h-4" /> Adobe Stock
-                                  </button>
-                                  <button
-                                    onClick={() => setActiveDownloadMenu({ type: 'shutterstock', targetImages: [selectedImage] })}
-                                    className="px-4 py-2.5 bg-white border border-slate-200 text-indigo-600 rounded-xl text-xs font-bold shadow-sm hover:bg-slate-50 flex items-center gap-2"
-                                  >
-                                    <Download className="w-4 h-4" /> Shutterstock
-                                  </button>
-                                </motion.div>
-                              )}
-                            </AnimatePresence>
-                          </div>
-
-                          {/* Metadata Forms */}
-                          <div className="space-y-4 pt-4 border-t border-slate-100">
-                            {/* Model and Key Info */}
-                            <div className="p-3 bg-indigo-50 rounded-xl border border-indigo-100 mb-4">
-                              <p className="text-[10px] text-indigo-800">
-                                Metadata berhasil digenerate menggunakan model <strong>{selectedImage.metadata!.usedModel}</strong> dengan API Key <strong>{selectedImage.metadata!.usedApiKey.substring(0, 4)}••••••••{selectedImage.metadata!.usedApiKey.substring(selectedImage.metadata!.usedApiKey.length - 4)}</strong>
-                              </p>
-                            </div>
-                            
-                            {/* Title Field */}
-                            <div className="space-y-2">
-                              <div className="flex justify-between items-center">
-                                <label className="text-[10px] uppercase font-bold text-indigo-600 tracking-wider">Judul</label>
-                                {!isEditing && (
-                                  <button onClick={() => copyToClipboard(selectedImage.metadata!.title, 'title')} className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400">
-                                    {copiedField === 'title' ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
-                                  </button>
-                                )}
-                              </div>
-                              {isEditing ? (
-                                <input 
-                                  value={editData?.title || ''}
-                                  onChange={(e) => setEditData(p => p ? {...p, title: e.target.value} : null)}
-                                  className="w-full p-3 bg-white border border-indigo-200 rounded-xl text-sm focus:ring-2 ring-indigo-500/10 focus:outline-none"
-                                />
-                              ) : (
-                                <div className="p-4 bg-white/60 border border-slate-100 rounded-2xl text-slate-800 font-medium text-sm">
-                                  {selectedImage.metadata.title}
-                                </div>
-                              )}
-                            </div>
-
-                            {/* Description Field */}
-                            <div className="space-y-2">
-                              <div className="flex justify-between items-center">
-                                <label className="text-[10px] uppercase font-bold text-indigo-600 tracking-wider">Deskripsi</label>
-                                {!isEditing && (
-                                  <button onClick={() => copyToClipboard(selectedImage.metadata!.description, 'desc')} className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400">
-                                    {copiedField === 'desc' ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
-                                  </button>
-                                )}
-                              </div>
-                              {isEditing ? (
-                                <textarea 
-                                  rows={3}
-                                  value={editData?.description || ''}
-                                  onChange={(e) => setEditData(p => p ? {...p, description: e.target.value} : null)}
-                                  className="w-full p-3 bg-white border border-indigo-200 rounded-xl text-sm focus:ring-2 ring-indigo-500/10 focus:outline-none resize-none"
-                                />
-                              ) : (
-                                <div className="p-4 bg-white/60 border border-slate-100 rounded-2xl text-slate-600 text-sm leading-relaxed">
-                                  {selectedImage.metadata.description}
-                                </div>
-                              )}
-                            </div>
-
-                            {/* Keywords Field */}
-                            <div className="space-y-2">
-                              <div className="flex justify-between items-center">
-                                <label className="text-[10px] uppercase font-bold text-indigo-600 tracking-wider">Kata Kunci ({selectedImage.metadata.keywords.length})</label>
-                                {!isEditing && (
-                                  <button onClick={() => copyToClipboard(selectedImage.metadata!.keywords.join(', '), 'keys')} className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400">
-                                    {copiedField === 'keys' ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
-                                  </button>
-                                )}
-                              </div>
-                              {isEditing ? (
-                                <textarea 
-                                  rows={4}
-                                  value={editData?.keywords || ''}
-                                  onChange={(e) => setEditData(p => p ? {...p, keywords: e.target.value} : null)}
-                                  placeholder="Keywords separated by commas"
-                                  className="w-full p-3 bg-white border border-indigo-200 rounded-xl text-sm focus:ring-2 ring-indigo-500/10 focus:outline-none resize-none"
-                                />
-                              ) : (
-                                <div className="flex flex-wrap gap-2">
-                                  {selectedImage.metadata.keywords.map((k, i) => (
-                                    <span key={i} className="px-3 py-1 bg-white border border-slate-100 rounded-full text-[11px] font-medium text-slate-600 shadow-sm">
-                                      {k}
-                                    </span>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-
-                            {isEditing && (
-                              <div className="flex gap-2 pt-4">
-                                <button onClick={() => setIsEditing(false)} className="flex-1 py-2.5 rounded-xl text-sm font-bold text-slate-500 hover:bg-slate-50 transition-colors">Batal</button>
-                                <button onClick={saveEdit} className="flex-1 py-2.5 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 shadow-lg shadow-indigo-100">Simpan</button>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      )}
-
-                      {selectedImage.status === 'processing' && (
-                        <div className="py-20 flex flex-col items-center justify-center text-center">
-                          <Loader2 className="w-10 h-10 text-indigo-500 animate-spin mb-4" />
-                          <h3 className="font-bold text-slate-800">Menganalisis Gambar...</h3>
-                          <p className="text-xs text-slate-500 mt-1">Menggunakan {selectedModel}</p>
-                        </div>
-                      )}
-
-                      {selectedImage.status === 'error' && (
-                        <div className="py-20 flex flex-col items-center justify-center text-center">
-                          <AlertCircle className="w-10 h-10 text-red-500 mb-4" />
-                          <h3 className="font-bold text-slate-800">Terjadi Kesalahan</h3>
-                          <p className="text-xs text-red-500 mt-1 max-w-xs">{selectedImage.error}</p>
-                          <button onClick={generateMetadata} className="mt-6 px-6 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold">Coba Lagi</button>
-                        </div>
-                      )}
-
-                      {selectedImage.status === 'pending' && (
-                        <div className="py-20 flex flex-col items-center justify-center text-center">
-                          <Sparkles className="w-10 h-10 text-indigo-300 mb-4" />
-                          <h3 className="font-bold text-slate-800">Siap Generate</h3>
-                          <p className="text-xs text-slate-500 mt-1">Klik tombol generate di bawah daftar gambar untuk memulai analisis AI</p>
-                        </div>
-                      )}
-                    </div>
-                  </motion.div>
-                ) : (
-                  <div className="bg-white/40 backdrop-blur-md rounded-3xl border border-dashed border-slate-200 p-12 flex flex-col items-center justify-center text-center text-slate-400">
-                    <ImageIcon className="w-12 h-12 mb-4 opacity-50" />
-                    <p className="text-sm">Pilih gambar untuk melihat atau mengedit metadata hasil generate.</p>
-                  </div>
-                )}
-
-              </div>
+                <MetadataPanel 
+                  selectedImage={selectedImage}
+                  viewMode={viewMode}
+                  setViewMode={setViewMode}
+                  isEditing={isEditing}
+                  setIsEditing={setIsEditing}
+                  editData={editData}
+                  setEditData={setEditData}
+                  copyToClipboard={copyToClipboard}
+                  copiedField={copiedField}
+                  saveEdit={saveEdit}
+                  generateMetadata={generateMetadata}
+                  isGenerating={isGenerating}
+                  selectedModel={selectedModel}
+                  regenerateSingleMetadata={regenerateSingleMetadata}
+                  activeDownloadMenu={activeDownloadMenu}
+                  setActiveDownloadMenu={setActiveDownloadMenu}
+                  exportExtension={exportExtension}
+                  setExportExtension={setExportExtension}
+                  downloadCSV={downloadCSV}
+                  downloadAdobeStockCSV={downloadAdobeStockCSV}
+                  downloadShutterstockCSV={downloadShutterstockCSV}
+                  images={images}
+                  toggleBatchHub={toggleBatchHub}
+                  isBatchHubCollapsed={isBatchHubCollapsed}
+                  setExportPlatform={setExportPlatform}
+                  exportPlatform={exportPlatform}
+                  addToast={addToast}
+                />
             </div>
           </div>
-        </main>
-      </div>
+        </motion.div>
+      ) : (
+        <PngTreeVault 
+          pngTreeAssets={pngTreeAssets}
+          selectedPngTreeId={selectedPngTreeId}
+          setSelectedPngTreeId={setSelectedPngTreeId}
+          setPngTreeAssets={setPngTreeAssets}
+          isGenerating={isGenerating}
+          generatePngTreeMetadata={generatePngTreeMetadata}
+          isPngTreeDragActive={isPngTreeDragActive}
+          isUploading={isUploading}
+          openPngTree={openPngTree}
+          getPngTreeRootProps={getPngTreeRootProps}
+          getPngTreeInputProps={getPngTreeInputProps}
+          selectedModel={selectedModel}
+          setSelectedModel={setSelectedModel}
+          showModelDropdown={showModelDropdown}
+          setShowModelDropdown={setShowModelDropdown}
+          setShowKeyModal={setShowKeyModal}
+          setShowInfoPage={setShowInfoPage}
+          setConfirmModal={setConfirmModal}
+          addToast={addToast}
+          modelDropdownRef={modelDropdownRef}
+          copyToClipboard={copyToClipboard}
+          copiedField={copiedField}
+          activeDownloadMenu={activeDownloadMenu}
+          setActiveDownloadMenu={setActiveDownloadMenu}
+          exportExtension={exportExtension}
+          setExportExtension={setExportExtension}
+          downloadCSV={downloadCSV}
+          downloadAdobeStockCSV={downloadAdobeStockCSV}
+          downloadShutterstockCSV={downloadShutterstockCSV}
+          titleLength={titleLength}
+          setTitleLength={setTitleLength}
+          keywordCount={keywordCount}
+          setKeywordCount={setKeywordCount}
+        />
+      )}
+    </AnimatePresence>
+  </main>
+</div>
 
       {/* API Key Modal */}
       <AnimatePresence>
@@ -1694,13 +1368,6 @@ export default function App() {
                       );
                     })
                   )}
-                </div>
-
-                <div className="p-4 bg-indigo-50 rounded-2xl border border-indigo-100 flex gap-3">
-                  <Info className="w-5 h-5 text-indigo-500 shrink-0" />
-                  <p className="text-[11px] text-indigo-700 leading-relaxed">
-                    Gunakan beberapa API Key untuk menghindari limit kuota. Sistem akan otomatis mengganti key jika terjadi error saat proses generate.
-                  </p>
                 </div>
               </div>
             </motion.div>
