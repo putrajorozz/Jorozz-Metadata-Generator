@@ -49,6 +49,7 @@ export default function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedPngTreeId, setSelectedPngTreeId] = useState<string | null>(null);
   const [pngTreeTitleLength, setPngTreeTitleLength] = useState<number>(100);
+  const [pngTreeKeywordCount, setPngTreeKeywordCount] = useState<number>(20);
   const [viewMode, setViewMode] = useState<'standard' | 'pngtree'>('standard');
   const [activePage, setActivePage] = useState<'dashboard' | 'pngtree'>('dashboard');
   const [isGenerating, setIsGenerating] = useState(false);
@@ -473,7 +474,7 @@ export default function App() {
                     Generate the following in JSON format:
                     - title: A descriptive title (${pngTreeTitleLength - 20}-${pngTreeTitleLength} characters). For isolated objects with transparency, specify the object name and "isolated" in title.
                     - pngTreeMainKeywords: Exactly 3 most relevant keywords.
-                    - pngTreeSecondaryKeywords: Exactly 20 relevant keywords (elements, style, colors). Include "transparent", "png", "isolated" if applicable.
+                    - pngTreeSecondaryKeywords: Exactly ${pngTreeKeywordCount} relevant keywords (elements, style, colors). Include "transparent", "png", "isolated" if applicable.
                     - pngTreeMainCopy: Primary text content in the image OR Indonesian language description if it is a local theme. 
                     
                     Everything except mainCopy must be in English.`;
@@ -1251,10 +1252,10 @@ export default function App() {
           downloadCSV={downloadCSV}
           downloadAdobeStockCSV={downloadAdobeStockCSV}
           downloadShutterstockCSV={downloadShutterstockCSV}
-          titleLength={titleLength}
-          setTitleLength={setTitleLength}
-          keywordCount={keywordCount}
-          setKeywordCount={setKeywordCount}
+          titleLength={pngTreeTitleLength}
+          setTitleLength={setPngTreeTitleLength}
+          keywordCount={pngTreeKeywordCount}
+          setKeywordCount={setPngTreeKeywordCount}
         />
       )}
     </AnimatePresence>

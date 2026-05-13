@@ -334,23 +334,33 @@ export function PngTreeVault({
             {selectedAsset ? (
               <div className="max-w-4xl mx-auto space-y-8">
                 {/* Meta Hero Section */}
-                <div className="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-8 items-start">
-                  <div className="aspect-square rounded-3xl overflow-hidden border-4 border-white shadow-2xl shadow-slate-200"
+                <div className="grid grid-cols-1 md:grid-cols-[160px_1fr] gap-6 items-start">
+                  <div className="aspect-square rounded-2xl overflow-hidden border-4 border-white shadow-xl shadow-slate-200"
                     style={{
                       backgroundImage: 'conic-gradient(#f1f5f9 25%, white 0 50%, #f1f5f9 0 75%, white 0)',
-                      backgroundSize: '20px 20px',
+                      backgroundSize: '16px 16px',
                     }}
                   >
-                    <img src={selectedAsset.preview} alt="" className="w-full h-full object-contain p-4" />
+                    <img src={selectedAsset.preview} alt="" className="w-full h-full object-contain p-3" />
                   </div>
-                  <div className="space-y-4">
+                  <div className="space-y-3">
                     <div className="flex items-center gap-3">
                       <span className="px-3 py-1 bg-indigo-50 text-indigo-700 rounded-full text-[10px] font-black uppercase tracking-tighter border border-indigo-100">PRO ASSET</span>
                       <span className="text-[10px] font-bold text-slate-400">{selectedAsset.file.name}</span>
                     </div>
-                    <h2 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tight leading-tight">
-                      {selectedAsset.metadata?.pngTree?.title || "Waiting for generation..."}
-                    </h2>
+                    <div className="flex items-center gap-2 group/title">
+                      <h2 className="text-lg md:text-xl font-bold text-slate-900 tracking-tight leading-tight">
+                        {selectedAsset.metadata?.pngTree?.title || "Waiting for generation..."}
+                      </h2>
+                      {selectedAsset.metadata?.pngTree?.title && (
+                        <button 
+                          onClick={() => copyToClipboard(selectedAsset.metadata!.pngTree!.title, 'p-title')}
+                          className="p-1.5 text-slate-300 hover:text-indigo-600 transition-colors opacity-0 group-hover/title:opacity-100"
+                        >
+                          {copiedField === 'p-title' ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" />}
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -365,15 +375,15 @@ export function PngTreeVault({
                             {copiedField === 'p-mkey' ? <Check className="w-5 h-5 text-emerald-500" /> : <Copy className="w-5 h-5" />}
                           </button>
                         </div>
-                        <div className="p-4 md:p-6 bg-slate-50 border border-slate-100 rounded-[1.5rem] md:rounded-[2.5rem] flex gap-2 overflow-x-auto custom-scrollbar-hide">
+                        <div className="p-3 md:p-4 bg-slate-50 border border-slate-100 rounded-[1.2rem] md:rounded-[1.5rem] flex gap-2 overflow-x-auto custom-scrollbar-hide">
                           {selectedAsset.metadata.pngTree.mainKeywords.map((k, i) => (
                             <button 
                               key={i}
                               onClick={() => copyToClipboard(k, `pmk-${i}`)}
-                              className="px-5 py-3 bg-white border-2 border-indigo-100 rounded-2xl text-xs md:text-sm font-black text-indigo-600 shadow-sm whitespace-nowrap hover:border-indigo-400 active:scale-95 transition-all flex items-center gap-2"
+                              className="px-3 py-1.5 bg-white border border-indigo-100 rounded-xl text-[10px] md:text-xs font-bold text-indigo-600 shadow-sm whitespace-nowrap hover:border-indigo-400 active:scale-95 transition-all flex items-center gap-1.5"
                             >
                               {k}
-                              {copiedField === `pmk-${i}` ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3 text-slate-300" />}
+                              {copiedField === `pmk-${i}` ? <Check className="w-2.5 h-2.5 text-emerald-500" /> : <Copy className="w-2.5 h-2.5 text-slate-300" />}
                             </button>
                           ))}
                         </div>
@@ -387,9 +397,9 @@ export function PngTreeVault({
                             {copiedField === 'p-skey' ? <Check className="w-5 h-5 text-emerald-500" /> : <Copy className="w-5 h-5" />}
                           </button>
                         </div>
-                        <div className="p-4 md:p-6 bg-slate-50 border border-slate-100 rounded-[1.5rem] md:rounded-[2.5rem] flex flex-wrap gap-1.5 sm:gap-2 content-start min-h-[100px] md:min-h-[150px]">
+                        <div className="p-4 md:p-5 bg-slate-50 border border-slate-100 rounded-[1.2rem] md:rounded-[1.5rem] flex flex-wrap gap-1.5 sm:gap-2 content-start min-h-[80px] md:min-h-[120px]">
                           {selectedAsset.metadata.pngTree.secondaryKeywords.slice(0, keywordCount).map((k, i) => (
-                            <span key={i} className="px-3 py-1 bg-white text-[9px] md:text-[10px] font-black text-slate-500 border border-slate-200 rounded-lg lowercase tracking-tight">
+                            <span key={i} className="px-2.5 py-1 bg-white text-[9px] md:text-[10px] font-bold text-slate-500 border border-slate-200 rounded-lg lowercase tracking-tight">
                               {k}
                             </span>
                           ))}
@@ -406,23 +416,9 @@ export function PngTreeVault({
                             {copiedField === 'p-copy' ? <Check className="w-5 h-5 text-emerald-500" /> : <Copy className="w-5 h-5" />}
                           </button>
                         </div>
-                        <div className="p-6 bg-slate-900 border border-slate-800 rounded-[1.5rem] md:rounded-[2.5rem] text-slate-100 font-bold text-sm min-h-[100px] shadow-2xl relative overflow-hidden group">
+                        <div className="p-5 bg-slate-900 border border-slate-800 rounded-[1.2rem] md:rounded-[1.5rem] text-slate-100 font-bold text-sm min-h-[80px] shadow-2xl relative overflow-hidden group">
                           <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/10 blur-3xl rounded-full" />
-                          <p className="relative z-10 leading-relaxed italic">{selectedAsset.metadata.pngTree.mainCopy || "No text content detected from analyzing the image."}</p>
-                        </div>
-                      </div>
-
-                      <div className="p-6 bg-indigo-600 rounded-[1.5rem] md:rounded-[2.5rem] text-white shadow-xl shadow-indigo-200">
-                        <h4 className="text-[10px] font-black uppercase tracking-[0.2em] opacity-80 mb-4">Export Utility</h4>
-                        <div className="space-y-3">
-                          <button className="w-full py-4 bg-white/20 hover:bg-white/30 rounded-2xl flex items-center justify-between px-6 transition-all group">
-                            <span className="text-xs font-black">Generate TXT Package</span>
-                            <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-                          </button>
-                          <button className="w-full py-4 bg-white font-black text-indigo-600 rounded-2xl flex items-center justify-between px-6 shadow-lg shadow-black/10 active:scale-95 transition-all">
-                            <span>Finalize Metadata</span>
-                            <Sparkles className="w-4 h-4" />
-                          </button>
+                          <p className="relative z-10 leading-relaxed italic text-xs md:text-sm">{selectedAsset.metadata.pngTree.mainCopy || "No text content detected from analyzing the image."}</p>
                         </div>
                       </div>
                     </div>
