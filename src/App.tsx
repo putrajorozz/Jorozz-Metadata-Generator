@@ -33,11 +33,9 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { cn } from './lib/utils';
 
 // Import new components
-import { Sidebar } from './components/Sidebar';
 import { TopHeader } from './components/TopHeader';
 import { AssetGrid } from './components/AssetGrid';
 import { MetadataPanel } from './components/MetadataPanel';
-import { PngTreeVault } from './components/PngTreeVault';
 
 // Import constants and types
 import { MODELS, CHANGELOG_DATA } from './constants';
@@ -45,13 +43,8 @@ import { ImageData, PngTreeMetadata, Toast } from './types';
 
 export default function App() {
   const [images, setImages] = useState<ImageData[]>([]);
-  const [pngTreeAssets, setPngTreeAssets] = useState<ImageData[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [selectedPngTreeId, setSelectedPngTreeId] = useState<string | null>(null);
-  const [pngTreeTitleLength, setPngTreeTitleLength] = useState<number>(100);
-  const [pngTreeKeywordCount, setPngTreeKeywordCount] = useState<number>(20);
   const [viewMode, setViewMode] = useState<'standard' | 'pngtree'>('standard');
-  const [activePage, setActivePage] = useState<'dashboard' | 'pngtree'>('dashboard');
   const [isGenerating, setIsGenerating] = useState(false);
   const [progress, setProgress] = useState(0);
   const [copiedField, setCopiedField] = useState<string | null>(null);
@@ -91,7 +84,6 @@ export default function App() {
     });
   };
   const [showInfoPage, setShowInfoPage] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [processingQueue, setProcessingQueue] = useState<string[]>([]); // Track job IDs
   const MAX_CONCURRENT = 3; // Limit parallel AI processing
@@ -124,17 +116,6 @@ export default function App() {
       localStorage.removeItem('favorite_model_id');
     }
   }, [favoriteModelId]);
-
-  const [isBatchHubCollapsed, setIsBatchHubCollapsed] = useState<boolean>(() => {
-    const saved = localStorage.getItem('isBatchHubCollapsed');
-    return saved === 'true';
-  });
-
-  const toggleBatchHub = () => {
-    const newState = !isBatchHubCollapsed;
-    setIsBatchHubCollapsed(newState);
-    localStorage.setItem('isBatchHubCollapsed', String(newState));
-  };
 
   const toggleLog = (id: string) => {
     setExpandedLogs(prev => 
@@ -280,69 +261,8 @@ export default function App() {
     }
   }, [images]);
 
-  const onPngTreeDrop = useCallback(async (acceptedFiles: File[]) => {
-    setIsUploading(true);
-    let duplicateCount = 0;
-    try {
-      const newAssets: ImageData[] = [];
-      
-      // Get current hashes
-      const existingHashes = new Set(pngTreeAssets.map(img => img.hash).filter(Boolean));
-
-      for (const file of acceptedFiles) {
-        const hash = await getFileHash(file);
-        
-        if (existingHashes.has(hash)) {
-          duplicateCount++;
-          continue;
-        }
-
-        const blobUrl = await processImage(file);
-        newAssets.push({
-          id: Math.random().toString(36).substring(7),
-          file,
-          preview: blobUrl,
-          hash,
-          status: 'pending' as const,
-          isAiGenerated: false,
-        });
-        existingHashes.add(hash);
-      }
-
-      if (duplicateCount > 0) {
-        addToast(`${duplicateCount} gambar duplikat dilewati`, "info");
-      }
-
-      if (newAssets.length > 0) {
-        setPngTreeAssets(prev => [...prev, ...newAssets]);
-        setSelectedPngTreeId(newAssets[0].id);
-      }
-    } catch (err) {
-      console.error("Error creating PNGTree previews", err);
-      addToast("Gagal memproses beberapa gambar PNGTree", "error");
-    } finally {
-      setIsUploading(false);
-    }
-  }, [pngTreeAssets]);
-
   const { getRootProps, getInputProps, isDragActive, open } = useDropzone({
     onDrop,
-    accept: { 
-      'image/jpeg': ['.jpg', '.jpeg'],
-      'image/png': ['.png'],
-      'image/svg+xml': ['.svg']
-    },
-    multiple: true,
-    noClick: true
-  });
-
-  const { 
-    getRootProps: getPngTreeRootProps, 
-    getInputProps: getPngTreeInputProps, 
-    isDragActive: isPngTreeDragActive, 
-    open: openPngTree 
-  } = useDropzone({
-    onDrop: onPngTreeDrop,
     accept: { 
       'image/jpeg': ['.jpg', '.jpeg'],
       'image/png': ['.png'],
@@ -416,139 +336,6 @@ export default function App() {
     images.find(img => img.id === selectedId), 
   [images, selectedId]);
 
-  const selectedPngTreeAsset = useMemo(() => 
-    pngTreeAssets.find(a => a.id === selectedPngTreeId),
-    [pngTreeAssets, selectedPngTreeId]
-  );
-
-  const generatePngTreeMetadata = async () => {
-    if (pngTreeAssets.length === 0 || isGenerating) return;
-
-    if (apiKeys.length === 0) {
-      addToast("Silakan masukkan API Key Anda terlebih dahulu", "error");
-      setShowKeyModal(true);
-      return;
-    }
-
-    setIsGenerating(true);
-    setProgress(0);
-
-    const pendingAssets = pngTreeAssets.filter(img => img.status !== 'completed');
-    let completedCount = 0;
-    let currentKeyIndex = 0;
-
-    for (const img of pendingAssets) {
-      setSelectedPngTreeId(img.id);
-      setPngTreeAssets(prev => prev.map(i => 
-        i.id === img.id ? { ...i, status: 'processing' } : i
-      ));
-
-      let success = false;
-      let modelIndex = favoriteModelId 
-        ? MODELS.findIndex(m => m.id === favoriteModelId) 
-        : MODELS.findIndex(m => m.id === selectedModel);
-      if (modelIndex === -1) modelIndex = 0;
-      
-      let modelsTried = 0;
-      const totalModels = MODELS.length;
-
-      while (!success && modelsTried < totalModels) {
-        const currentModelId = MODELS[modelIndex].id;
-        let retryCount = 0;
-        const maxRetries = apiKeys.length;
-
-        while (!success && retryCount < maxRetries) {
-          const currentKey = apiKeys[currentKeyIndex];
-          setActiveApiKey(currentKey);
-          const ai = new GoogleGenAI({ apiKey: currentKey });
-
-          try {
-            const reader = new FileReader();
-            const base64Data = await new Promise<string>((resolve, reject) => {
-              reader.onload = () => resolve((reader.result as string).split(",")[1]);
-              reader.onerror = () => reject(new Error("Gagal membaca file"));
-              reader.readAsDataURL(img.file);
-            });
-
-            const promptText = `Analyze this image for PNGTree metadata. 
-                    Generate the following in JSON format:
-                    - title: A descriptive title (${pngTreeTitleLength - 20}-${pngTreeTitleLength} characters). For isolated objects with transparency, specify the object name and "isolated" in title.
-                    - pngTreeMainKeywords: Exactly 3 most relevant keywords.
-                    - pngTreeSecondaryKeywords: Exactly ${pngTreeKeywordCount} relevant keywords (elements, style, colors). Include "transparent", "isolated" if applicable.
-                    - pngTreeMainCopy: Primary text content in the image OR Indonesian language description if it is a local theme. 
-                    
-                    IMPORTANT CONSTRAINTS:
-                    - DO NOT use the words "oriental", "png", or "download" in any field.
-                    - Everything except mainCopy must be in English.`;
-            
-            const response = await ai.models.generateContent({
-              model: currentModelId,
-              contents: {
-                parts: [
-                  { inlineData: { mimeType: img.file.type || "image/jpeg", data: base64Data } },
-                  { text: promptText },
-                ],
-              },
-              config: {
-                responseMimeType: "application/json",
-                responseSchema: {
-                  type: Type.OBJECT,
-                  properties: {
-                    title: { type: Type.STRING },
-                    pngTreeMainKeywords: { type: Type.ARRAY, items: { type: Type.STRING } },
-                    pngTreeSecondaryKeywords: { type: Type.ARRAY, items: { type: Type.STRING } },
-                    pngTreeMainCopy: { type: Type.STRING }
-                  },
-                  required: ["title", "pngTreeMainKeywords", "pngTreeSecondaryKeywords", "pngTreeMainCopy"]
-                }
-              }
-            });
-
-            const result = JSON.parse(response.text || "{}");
-            
-            const updatedMetadata = {
-              title: result.title,
-              description: result.title,
-              keywords: [...result.pngTreeMainKeywords, ...result.pngTreeSecondaryKeywords].slice(0, 50),
-              categories: ["Backgrounds/Textures", "Travel"],
-              adobeCategory: "Graphic Resources",
-              prompt: promptText,
-              model: currentModelId,
-              usedModel: MODELS[modelIndex].name,
-              usedApiKey: currentKey.slice(-4),
-              pngTree: {
-                title: result.title,
-                mainKeywords: result.pngTreeMainKeywords,
-                secondaryKeywords: result.pngTreeSecondaryKeywords,
-                mainCopy: result.pngTreeMainCopy
-              }
-            };
-
-            setPngTreeAssets(prev => prev.map(i => i.id === img.id ? { ...i, status: 'completed', metadata: updatedMetadata } : i));
-            success = true;
-            setActiveApiKey(null);
-            addToast(`PNGTree: ${img.file.name} Berhasil`, "success");
-            currentKeyIndex = (currentKeyIndex + 1) % apiKeys.length;
-          } catch (error) {
-            currentKeyIndex = (currentKeyIndex + 1) % apiKeys.length;
-            retryCount++;
-          }
-        }
-        if (!success) {
-          modelIndex = (modelIndex + 1) % MODELS.length;
-          modelsTried++;
-        }
-      }
-      if (!success) {
-        setPngTreeAssets(prev => prev.map(i => i.id === img.id ? { ...i, status: 'error', error: "Gagal memproses" } : i));
-      }
-      completedCount++;
-      setProgress((completedCount / pendingAssets.length) * 100);
-    }
-    setIsGenerating(false);
-    setActiveApiKey(null);
-  };
-
   const generateMetadata = async () => {
     if (images.length === 0 || isGenerating) return;
 
@@ -615,10 +402,12 @@ export default function App() {
                     
                     Specifically for PNGTree:
                     - pngTreeMainKeywords: Exactly 3 keywords that are most relevant to the work.
-                    - pngTreeSecondaryKeywords: Exactly 30-50 keywords related to the work (style, color, elements, etc.).
+                    - pngTreeSecondaryKeywords: Exactly 20 unique keywords related to the work (style, color, elements, etc.). IGNORE the general keyword count and always provide exactly 20 for this field.
                     - pngTreeMainCopy: The primary text information contained in the work, or non-English words related to the image (Indonesian, etc.).
                     
-                    All metadata must be in English unless specified for pngTreeMainCopy.`;
+                    IMPORTANT CONSTRAINTS:
+                    - DO NOT use the words "oriental", "png", or "download" in any field (title, description, keywords).
+                    - All metadata must be in English unless specified for pngTreeMainCopy.`;
             
             const response = await ai.models.generateContent({
               model: currentModelId,
@@ -805,10 +594,12 @@ export default function App() {
                   
                   Specifically for PNGTree:
                   - pngTreeMainKeywords: Exactly 3 keywords that are most relevant to the work.
-                  - pngTreeSecondaryKeywords: Exactly 30-50 keywords related to the work (style, color, elements, etc.).
+                  - pngTreeSecondaryKeywords: Exactly 20 unique keywords related to the work (style, color, elements, etc.). IGNORE the general keyword count and always provide exactly 20 for this field.
                   - pngTreeMainCopy: The primary text information contained in the work, or non-English words related to the image (Indonesian, etc.).
                   
-                  All metadata must be in English unless specified for pngTreeMainCopy.`;
+                  IMPORTANT CONSTRAINTS:
+                  - DO NOT use the words "oriental", "png", or "download" in any field (title, description, keywords).
+                  - All metadata must be in English unless specified for pngTreeMainCopy.`;
           
           const response = await ai.models.generateContent({
             model: currentModelId,
@@ -1073,14 +864,6 @@ export default function App() {
       <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-purple-200/40 blur-[120px] rounded-full pointer-events-none" />
 
       <div className="flex h-screen relative z-10 overflow-hidden">
-        <Sidebar 
-          activePage={activePage} 
-          setActivePage={setActivePage} 
-          setShowSettings={setShowSettings} 
-          open={open} 
-          openPngTree={openPngTree} 
-        />
-
         {/* Main Content */}
         <main 
           {...getRootProps()}
@@ -1088,17 +871,9 @@ export default function App() {
         >
           <input {...getInputProps()} />
           
-          <AnimatePresence mode="wait">
-            {activePage === 'dashboard' ? (
-              <motion.div 
-                key="dashboard"
-                initial={{ opacity: 0, x: -10 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: 10 }}
-                className="flex-1 flex flex-col overflow-hidden"
-              >
-                {/* Drag & Drop Overlay */}
-                <AnimatePresence>
+          <div className="flex-1 flex flex-col overflow-hidden">
+            {/* Drag & Drop Overlay */}
+            <AnimatePresence>
             {isDragActive && !isUploading && (
               <motion.div 
                 initial={{ opacity: 0 }}
@@ -1120,12 +895,23 @@ export default function App() {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                className="absolute inset-0 z-50 bg-indigo-600/20 backdrop-blur-[4px] flex items-center justify-center p-8"
+                className="absolute inset-0 z-[100] bg-indigo-600/20 backdrop-blur-[4px] flex items-center justify-center p-8 md:p-12"
               >
-                <div className="bg-white/90 p-8 rounded-3xl shadow-2xl flex flex-col items-center max-w-sm w-full text-center">
-                  <Loader2 className="w-12 h-12 text-indigo-500 animate-spin mb-4" />
-                  <h3 className="text-xl font-bold text-slate-800">Menyiapkan Gambar...</h3>
-                  <p className="text-sm text-slate-500 mt-2">Mengecilkan ukuran gambar agar web tidak berat.</p>
+                <div className="bg-white/95 p-8 rounded-[2.5rem] shadow-2xl flex flex-col items-center max-w-sm w-full text-center border border-indigo-100">
+                  <div className="relative mb-4">
+                    <Loader2 className="w-12 h-12 text-indigo-500 animate-spin" />
+                    <Upload className="w-5 h-5 text-indigo-300 absolute inset-0 m-auto" />
+                  </div>
+                  <h3 className="text-xl font-black text-slate-800 tracking-tight">MENYIAPKAN GAMBAR...</h3>
+                  <p className="text-xs text-slate-500 mt-2 font-medium leading-relaxed">Mengecilkan ukuran gambar agar web tidak berat dan proses AI lebih cepat.</p>
+                  <div className="mt-6 w-full h-1 bg-slate-100 rounded-full overflow-hidden">
+                    <motion.div 
+                      className="h-full bg-indigo-500"
+                      initial={{ width: "0%" }}
+                      animate={{ width: "100%" }}
+                      transition={{ duration: 2, repeat: Infinity }}
+                    />
+                  </div>
                 </div>
               </motion.div>
             )}
@@ -1180,6 +966,7 @@ export default function App() {
                   setSelectedId={setSelectedId}
                   setImages={setImages}
                   isDragActive={isDragActive}
+                  viewMode={viewMode}
                   open={open}
                   showSettingsPanel={showSettingsPanel}
                   setShowSettingsPanel={setShowSettingsPanel}
@@ -1189,10 +976,16 @@ export default function App() {
                   setKeywordCount={setKeywordCount}
                   generateMetadata={generateMetadata}
                   isGenerating={isGenerating}
+                  exportExtension={exportExtension}
+                  setExportExtension={setExportExtension}
+                  downloadCSV={downloadCSV}
+                  downloadAdobeStockCSV={downloadAdobeStockCSV}
+                  downloadShutterstockCSV={downloadShutterstockCSV}
                 />
 
                 <MetadataPanel 
                   selectedImage={selectedImage}
+                  setSelectedId={setSelectedId}
                   viewMode={viewMode}
                   setViewMode={setViewMode}
                   isEditing={isEditing}
@@ -1214,57 +1007,15 @@ export default function App() {
                   downloadAdobeStockCSV={downloadAdobeStockCSV}
                   downloadShutterstockCSV={downloadShutterstockCSV}
                   images={images}
-                  toggleBatchHub={toggleBatchHub}
-                  isBatchHubCollapsed={isBatchHubCollapsed}
-                  setExportPlatform={setExportPlatform}
-                  exportPlatform={exportPlatform}
                   addToast={addToast}
                 />
             </div>
           </div>
-        </motion.div>
-      ) : (
-        <PngTreeVault 
-          pngTreeAssets={pngTreeAssets}
-          selectedPngTreeId={selectedPngTreeId}
-          setSelectedPngTreeId={setSelectedPngTreeId}
-          setPngTreeAssets={setPngTreeAssets}
-          isGenerating={isGenerating}
-          generatePngTreeMetadata={generatePngTreeMetadata}
-          isPngTreeDragActive={isPngTreeDragActive}
-          isUploading={isUploading}
-          openPngTree={openPngTree}
-          getPngTreeRootProps={getPngTreeRootProps}
-          getPngTreeInputProps={getPngTreeInputProps}
-          selectedModel={selectedModel}
-          setSelectedModel={setSelectedModel}
-          showModelDropdown={showModelDropdown}
-          setShowModelDropdown={setShowModelDropdown}
-          setShowKeyModal={setShowKeyModal}
-          setShowInfoPage={setShowInfoPage}
-          setConfirmModal={setConfirmModal}
-          addToast={addToast}
-          modelDropdownRef={modelDropdownRef}
-          copyToClipboard={copyToClipboard}
-          copiedField={copiedField}
-          activeDownloadMenu={activeDownloadMenu}
-          setActiveDownloadMenu={setActiveDownloadMenu}
-          exportExtension={exportExtension}
-          setExportExtension={setExportExtension}
-          downloadCSV={downloadCSV}
-          downloadAdobeStockCSV={downloadAdobeStockCSV}
-          downloadShutterstockCSV={downloadShutterstockCSV}
-          titleLength={pngTreeTitleLength}
-          setTitleLength={setPngTreeTitleLength}
-          keywordCount={pngTreeKeywordCount}
-          setKeywordCount={setPngTreeKeywordCount}
-        />
-      )}
-    </AnimatePresence>
-  </main>
-</div>
+        </div>
+      </main>
+    </div>
 
-      {/* API Key Modal */}
+    {/* API Key Modal */}
       <AnimatePresence>
         {showKeyModal && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">

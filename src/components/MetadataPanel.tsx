@@ -16,6 +16,7 @@ import { ImageData } from '../types';
 
 interface MetadataPanelProps {
   selectedImage: ImageData | undefined;
+  setSelectedId: (id: string | null) => void;
   viewMode: 'standard' | 'pngtree';
   setViewMode: (mode: 'standard' | 'pngtree') => void;
   isEditing: boolean;
@@ -33,19 +34,16 @@ interface MetadataPanelProps {
   setActiveDownloadMenu: (menu: { type: 'adobe' | 'shutterstock'; targetImages?: ImageData[] } | null) => void;
   exportExtension: string;
   setExportExtension: (ext: any) => void;
-  downloadCSV: (images: ImageData[]) => void;
-  downloadAdobeStockCSV: (images: ImageData[]) => void;
-  downloadShutterstockCSV: (images: ImageData[]) => void;
+  downloadCSV: (images?: ImageData[]) => void;
+  downloadAdobeStockCSV: (images?: ImageData[]) => void;
+  downloadShutterstockCSV: (images?: ImageData[]) => void;
   images: ImageData[];
-  toggleBatchHub: () => void;
-  isBatchHubCollapsed: boolean;
-  setExportPlatform: (platform: any) => void;
-  exportPlatform: 'Freepik' | 'Adobe' | 'Shutterstock';
   addToast: (message: string, type?: 'success' | 'error' | 'info') => void;
 }
 
 export function MetadataPanel({
   selectedImage,
+  setSelectedId,
   viewMode,
   setViewMode,
   isEditing,
@@ -67,17 +65,19 @@ export function MetadataPanel({
   downloadAdobeStockCSV,
   downloadShutterstockCSV,
   images,
-  toggleBatchHub,
-  isBatchHubCollapsed,
-  setExportPlatform,
-  exportPlatform,
   addToast
 }: MetadataPanelProps) {
+  const completedImages = images.filter(img => img.status === 'completed' && img.metadata);
+
   if (!selectedImage) {
     return (
-      <div className="bg-white/40 backdrop-blur-md rounded-3xl border border-dashed border-slate-200 p-12 flex flex-col items-center justify-center text-center text-slate-400">
-        <ImageIcon className="w-12 h-12 mb-4 opacity-50" />
-        <p className="text-sm">Pilih gambar untuk melihat atau mengedit metadata hasil generate.</p>
+      <div className="flex flex-col gap-6 h-full">
+        {/* Empty State / Hint */}
+        <div className="flex-1 bg-white/40 backdrop-blur-md rounded-3xl border border-dashed border-slate-200 p-8 flex flex-col items-center justify-center text-center text-slate-400">
+          <ImageIcon className="w-10 h-10 mb-3 opacity-30" />
+          <h3 className="text-sm font-bold text-slate-800">Detail Metadata</h3>
+          <p className="text-xs font-medium mt-1">Pilih salah satu gambar di samping untuk melihat atau mengedit detail metadatanya secara spesifik.</p>
+        </div>
       </div>
     );
   }
@@ -91,16 +91,19 @@ export function MetadataPanel({
       {/* Detail Header */}
       <div className="p-4 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl overflow-hidden shadow-sm border border-white">
+          <div className={cn(
+            "w-10 h-10 rounded-xl overflow-hidden shadow-sm border border-white relative",
+            viewMode === 'pngtree' && "bg-[url('https://www.transparenttextures.com/patterns/checkerboard.png')] bg-repeat"
+          )}>
             <img src={selectedImage.preview} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
           </div>
-          <div>
-            <h3 className="text-xs font-bold text-slate-800 truncate max-w-[150px]">{selectedImage.file.name}</h3>
+          <div className="flex-1 min-w-0">
+            <h3 className="text-xs font-bold text-slate-800 truncate">{selectedImage.file.name}</h3>
             <p className="text-[10px] text-slate-400 font-medium">{(selectedImage.file.size / 1024).toFixed(1)} KB</p>
           </div>
         </div>
         
-        <div className="flex bg-white p-1 rounded-xl border border-slate-200">
+        <div className="flex bg-white p-1 rounded-xl border border-slate-200 ml-2">
           <button 
             onClick={() => setViewMode('standard')}
             className={cn(
@@ -124,7 +127,8 @@ export function MetadataPanel({
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 sm:p-6 custom-scrollbar">
+      <div className="flex-1 overflow-y-auto custom-scrollbar">
+        <div className="p-4 sm:p-6 space-y-6">
         {selectedImage.status === 'completed' && selectedImage.metadata ? (
           <div className="space-y-6">
             {/* Quick Actions */}
@@ -455,6 +459,7 @@ export function MetadataPanel({
             <p className="text-xs text-slate-500 mt-1">Klik tombol generate di bawah daftar gambar untuk memulai analisis AI</p>
           </div>
         )}
+        </div>
       </div>
     </motion.div>
   );

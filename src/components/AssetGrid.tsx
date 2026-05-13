@@ -7,7 +7,8 @@ import {
   AlertCircle, 
   ChevronUp, 
   ChevronDown, 
-  Sparkles 
+  Sparkles,
+  Download 
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { ImageData } from '../types';
@@ -18,6 +19,7 @@ interface AssetGridProps {
   setSelectedId: (id: string | null) => void;
   setImages: (images: ImageData[] | ((prev: ImageData[]) => ImageData[])) => void;
   isDragActive: boolean;
+  viewMode: 'standard' | 'pngtree';
   open: () => void;
   showSettingsPanel: boolean;
   setShowSettingsPanel: (show: boolean) => void;
@@ -27,6 +29,11 @@ interface AssetGridProps {
   setKeywordCount: (val: number) => void;
   generateMetadata: () => void;
   isGenerating: boolean;
+  exportExtension: string;
+  setExportExtension: (ext: any) => void;
+  downloadCSV: (images?: ImageData[]) => void;
+  downloadAdobeStockCSV: (images?: ImageData[]) => void;
+  downloadShutterstockCSV: (images?: ImageData[]) => void;
 }
 
 export function AssetGrid({
@@ -35,6 +42,7 @@ export function AssetGrid({
   setSelectedId,
   setImages,
   isDragActive,
+  viewMode,
   open,
   showSettingsPanel,
   setShowSettingsPanel,
@@ -43,8 +51,14 @@ export function AssetGrid({
   keywordCount,
   setKeywordCount,
   generateMetadata,
-  isGenerating
+  isGenerating,
+  exportExtension,
+  setExportExtension,
+  downloadCSV,
+  downloadAdobeStockCSV,
+  downloadShutterstockCSV
 }: AssetGridProps) {
+  const completedImages = images.filter(img => img.status === 'completed' && img.metadata);
   return (
     <div className="space-y-6">
       {/* Persistent Upload Area */}
@@ -81,40 +95,45 @@ export function AssetGrid({
                 onClick={() => setSelectedId(img.id)}
               >
                 {img.file.type.startsWith('image/') ? (
-                  <img src={img.preview} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  <div className={cn(
+                    "w-full h-full relative",
+                    viewMode === 'pngtree' && "bg-[url('https://www.transparenttextures.com/patterns/checkerboard.png')] bg-repeat"
+                  )}>
+                    <img src={img.preview} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  </div>
                 ) : (
                   <div className="w-full h-full bg-slate-50 flex items-center justify-center text-slate-300">
                     <FileText className="w-5 h-5" />
                   </div>
                 )}
                 
-                {/* Delete Button */}
+                {/* Trash/Delete Button POJOK KANAN BAWAH */}
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
                     setImages(prev => prev.filter(i => i.id !== img.id));
                     if (selectedId === img.id) setSelectedId(null);
                   }}
-                  className="absolute top-1 right-1 p-1 bg-white/90 rounded-full shadow-sm text-slate-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity z-20"
+                  className="absolute bottom-1 right-1 p-1 bg-red-500/90 rounded-lg shadow-sm text-white opacity-0 group-hover:opacity-100 transition-opacity z-20 hover:bg-red-600"
                 >
-                  <X className="w-3.5 h-3.5" />
+                  <X className="w-3 h-3" />
                 </button>
 
                 {/* Status Overlay */}
-                <div className="absolute inset-x-0 bottom-0 p-1 flex justify-end pointer-events-none">
+                <div className="absolute top-1 left-1 p-0.5 flex justify-end pointer-events-none">
                   {img.status === 'completed' && (
-                    <div className="w-4 h-4 bg-green-500 rounded-full flex items-center justify-center shadow-lg border-2 border-white">
-                      <Check className="w-2.5 h-2.5 text-white" />
+                    <div className="w-3.5 h-3.5 bg-green-500 rounded-full flex items-center justify-center shadow-lg border-2 border-white">
+                      <Check className="w-2 h-2 text-white" />
                     </div>
                   )}
                   {img.status === 'processing' && (
-                    <div className="w-4 h-4 bg-indigo-500 rounded-full flex items-center justify-center shadow-lg border-2 border-white animate-pulse">
-                      <Loader2 className="w-2.5 h-2.5 text-white animate-spin" />
+                    <div className="w-3.5 h-3.5 bg-indigo-500 rounded-full flex items-center justify-center shadow-lg border-2 border-white animate-pulse">
+                      <Loader2 className="w-2 h-2 text-white animate-spin" />
                     </div>
                   )}
                   {img.status === 'error' && (
-                    <div className="w-4 h-4 bg-red-500 rounded-full flex items-center justify-center shadow-lg border-2 border-white">
-                      <AlertCircle className="w-2.5 h-2.5 text-white" />
+                    <div className="w-3.5 h-3.5 bg-red-500 rounded-full flex items-center justify-center shadow-lg border-2 border-white">
+                      <AlertCircle className="w-2 h-2 text-white" />
                     </div>
                   )}
                 </div>
@@ -182,6 +201,70 @@ export function AssetGrid({
           </button>
         </div>
       )}
+
+      {/* Batch Download Hub - Now on the left below image list/settings */}
+      <div className="bg-white/40 backdrop-blur-md rounded-3xl border border-slate-200 overflow-hidden flex flex-col shadow-sm">
+        <div className="p-3 bg-indigo-600/10 border-b border-indigo-100/50 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Download className="w-3.5 h-3.5 text-indigo-600" />
+            <h3 className="text-[10px] font-black text-indigo-700 uppercase tracking-widest">Batch Download Hub</h3>
+          </div>
+          <span className="px-2 py-0.5 bg-indigo-600 text-white rounded-full text-[8px] font-black">
+            {completedImages.length} READY
+          </span>
+        </div>
+        
+        <div className="p-4 space-y-4">
+          {completedImages.length > 0 ? (
+            <>
+              <div className="space-y-2">
+                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tight">Format Export:</span>
+                <div className="flex gap-1.5">
+                  {(['.eps', '.jpg', '.png'] as const).map((ext) => (
+                    <button
+                      key={ext}
+                      onClick={() => setExportExtension(ext)}
+                      className={cn(
+                        "flex-1 py-1.5 rounded-lg text-[10px] font-bold transition-all border",
+                        exportExtension === ext
+                          ? "bg-indigo-600 border-indigo-600 text-white shadow-sm"
+                          : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"
+                      )}
+                    >
+                      {ext}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-2">
+                <button 
+                  onClick={() => downloadCSV()}
+                  className="w-full py-2.5 bg-white border border-slate-200 rounded-xl text-[10px] font-bold text-indigo-600 hover:bg-slate-50 transition-all flex items-center justify-center gap-1.5 shadow-xs"
+                >
+                  <Download className="w-3 h-3" /> Freepik Batch
+                </button>
+                <button 
+                  onClick={() => downloadAdobeStockCSV()}
+                  className="w-full py-2.5 bg-white border border-slate-200 rounded-xl text-[10px] font-bold text-indigo-600 hover:bg-slate-50 transition-all flex items-center justify-center gap-1.5 shadow-xs"
+                >
+                  <Download className="w-3 h-3" /> Adobe Batch
+                </button>
+                <button 
+                  onClick={() => downloadShutterstockCSV()}
+                  className="w-full py-2.5 bg-white border border-slate-200 rounded-xl text-[10px] font-bold text-indigo-600 hover:bg-slate-50 transition-all flex items-center justify-center gap-1.5 shadow-xs"
+                >
+                  <Download className="w-3 h-3" /> Shutterstock Batch
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="py-4 flex flex-col items-center text-center">
+              <p className="text-[10px] text-slate-400 font-medium italic">Belum ada hasil generate untuk didownload.</p>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
