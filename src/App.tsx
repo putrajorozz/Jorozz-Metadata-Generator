@@ -373,14 +373,18 @@ export default function App() {
         canvas.width = MAX_WIDTH;
         canvas.height = img.height * scaleSize;
         const ctx = canvas.getContext('2d');
+        ctx?.clearRect(0, 0, canvas.width, canvas.height); // Ensure transparency is cleared
         ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
+        
+        const mimeType = file.type === 'image/png' || file.type === 'image/svg+xml' ? 'image/png' : 'image/jpeg';
+        
         canvas.toBlob((blob) => {
           if (blob) {
             resolve(URL.createObjectURL(blob));
           } else {
             reject(new Error("Canvas to Blob failed"));
           }
-        }, 'image/jpeg', 0.6);
+        }, mimeType, mimeType === 'image/jpeg' ? 0.6 : 1.0);
       };
       img.onerror = () => reject(new Error("Gagal memuat gambar untuk preview"));
       img.src = URL.createObjectURL(file);

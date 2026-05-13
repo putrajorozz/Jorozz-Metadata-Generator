@@ -291,13 +291,11 @@ export function PngTreeVault({
                         selectedPngTreeId === asset.id ? "border-indigo-600 ring-2 ring-indigo-500/20 shadow-md" : "border-slate-100 hover:border-indigo-300"
                       )}
                     style={{
-                      backgroundImage: 'radial-gradient(#e5e7eb 1px, transparent 1px), radial-gradient(#e5e7eb 1px, transparent 1px)',
-                      backgroundSize: '8px 8px',
-                      backgroundPosition: '0 0, 5px 5px',
-                      backgroundColor: '#f9fafb'
+                      backgroundImage: 'conic-gradient(#f1f5f9 25%, white 0 50%, #f1f5f9 0 75%, white 0)',
+                      backgroundSize: '10px 10px',
                     }}
                   >
-                    <img src={asset.preview} alt="" className="w-full h-full object-cover" />
+                    <img src={asset.preview} alt="" className="w-full h-full object-contain p-2" />
                     
                     <div className={cn(
                       "absolute inset-0 bg-indigo-600/10 opacity-0 group-hover:opacity-100 transition-opacity",
@@ -339,13 +337,11 @@ export function PngTreeVault({
                 <div className="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-8 items-start">
                   <div className="aspect-square rounded-3xl overflow-hidden border-4 border-white shadow-2xl shadow-slate-200"
                     style={{
-                      backgroundImage: 'radial-gradient(#e5e7eb 1px, transparent 1px), radial-gradient(#e5e7eb 1px, transparent 1px)',
-                      backgroundSize: '10px 10px',
-                      backgroundPosition: '0 0, 5px 5px',
-                      backgroundColor: '#f3f4f6'
+                      backgroundImage: 'conic-gradient(#f1f5f9 25%, white 0 50%, #f1f5f9 0 75%, white 0)',
+                      backgroundSize: '20px 20px',
                     }}
                   >
-                    <img src={selectedAsset.preview} alt="" className="w-full h-full object-cover" />
+                    <img src={selectedAsset.preview} alt="" className="w-full h-full object-contain p-4" />
                   </div>
                   <div className="space-y-4">
                     <div className="flex items-center gap-3">
