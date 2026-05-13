@@ -109,6 +109,31 @@ export function PngTreeVault({
             </div>
           </motion.div>
         )}
+        {isUploading && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-[100] bg-indigo-600/20 backdrop-blur-[4px] flex items-center justify-center p-8 md:p-12"
+          >
+            <div className="bg-white/95 p-8 rounded-[2.5rem] shadow-2xl flex flex-col items-center max-w-sm w-full text-center border border-indigo-100">
+              <div className="relative mb-4">
+                <Loader2 className="w-12 h-12 text-indigo-500 animate-spin" />
+                <Upload className="w-5 h-5 text-indigo-300 absolute inset-0 m-auto" />
+              </div>
+              <h3 className="text-xl font-black text-slate-800 tracking-tight">MENYIAPKAN GAMBAR...</h3>
+              <p className="text-xs text-slate-500 mt-2 font-medium leading-relaxed">Mengecilkan ukuran gambar agar web tidak berat dan proses AI lebih cepat.</p>
+              <div className="mt-6 w-full h-1 bg-slate-100 rounded-full overflow-hidden">
+                <motion.div 
+                  className="h-full bg-indigo-500"
+                  initial={{ width: "0%" }}
+                  animate={{ width: "100%" }}
+                  transition={{ duration: 2, repeat: Infinity }}
+                />
+              </div>
+            </div>
+          </motion.div>
+        )}
       </AnimatePresence>
 
       <div className="flex-1 flex flex-col overflow-hidden">
