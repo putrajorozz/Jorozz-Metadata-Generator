@@ -348,16 +348,17 @@ export function PngTreeVault({
                       <span className="px-3 py-1 bg-indigo-50 text-indigo-700 rounded-full text-[10px] font-black uppercase tracking-tighter border border-indigo-100">PRO ASSET</span>
                       <span className="text-[10px] font-bold text-slate-400">{selectedAsset.file.name}</span>
                     </div>
-                    <div className="flex items-center gap-2 group/title">
-                      <h2 className="text-lg md:text-xl font-bold text-slate-900 tracking-tight leading-tight">
+                    <div className="flex items-start gap-4">
+                      <h2 className="text-sm md:text-base font-bold text-slate-900 tracking-tight leading-relaxed flex-1">
                         {selectedAsset.metadata?.pngTree?.title || "Waiting for generation..."}
                       </h2>
                       {selectedAsset.metadata?.pngTree?.title && (
                         <button 
                           onClick={() => copyToClipboard(selectedAsset.metadata!.pngTree!.title, 'p-title')}
-                          className="p-1.5 text-slate-300 hover:text-indigo-600 transition-colors opacity-0 group-hover/title:opacity-100"
+                          className="shrink-0 p-2 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 rounded-xl transition-all shadow-sm active:scale-95"
+                          title="Copy Title"
                         >
-                          {copiedField === 'p-title' ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" />}
+                          {copiedField === 'p-title' ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
                         </button>
                       )}
                     </div>
