@@ -474,10 +474,12 @@ export default function App() {
                     Generate the following in JSON format:
                     - title: A descriptive title (${pngTreeTitleLength - 20}-${pngTreeTitleLength} characters). For isolated objects with transparency, specify the object name and "isolated" in title.
                     - pngTreeMainKeywords: Exactly 3 most relevant keywords.
-                    - pngTreeSecondaryKeywords: Exactly ${pngTreeKeywordCount} relevant keywords (elements, style, colors). Include "transparent", "png", "isolated" if applicable.
+                    - pngTreeSecondaryKeywords: Exactly ${pngTreeKeywordCount} relevant keywords (elements, style, colors). Include "transparent", "isolated" if applicable.
                     - pngTreeMainCopy: Primary text content in the image OR Indonesian language description if it is a local theme. 
                     
-                    Everything except mainCopy must be in English.`;
+                    IMPORTANT CONSTRAINTS:
+                    - DO NOT use the words "oriental", "png", or "download" in any field.
+                    - Everything except mainCopy must be in English.`;
             
             const response = await ai.models.generateContent({
               model: currentModelId,
