@@ -8,9 +8,11 @@ import {
   Check, 
   Copy, 
   Loader2, 
-  AlertCircle 
+  AlertCircle,
+  X 
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { useEffect } from 'react';
 import { cn } from '../lib/utils';
 import { ImageData } from '../types';
 
@@ -21,8 +23,16 @@ interface MetadataPanelProps {
   setViewMode: (mode: 'standard' | 'pngtree') => void;
   isEditing: boolean;
   setIsEditing: (editing: boolean) => void;
-  editData: { title: string; description: string; keywords: string } | null;
-  setEditData: (data: { title: string; description: string; keywords: string } | null | ((prev: any) => any)) => void;
+  startEditing: () => void;
+  editData: { 
+    title: string; 
+    description: string; 
+    keywords: string;
+    ptMainKeywords?: string;
+    ptSecondaryKeywords?: string;
+    ptMainCopy?: string;
+  } | null;
+  setEditData: (data: any) => void;
   copyToClipboard: (text: string, field: string) => void;
   copiedField: string | null;
   saveEdit: () => void;
@@ -48,6 +58,7 @@ export function MetadataPanel({
   setViewMode,
   isEditing,
   setIsEditing,
+  startEditing,
   editData,
   setEditData,
   copyToClipboard,
@@ -68,6 +79,22 @@ export function MetadataPanel({
   addToast
 }: MetadataPanelProps) {
   const completedImages = images.filter(img => img.status === 'completed' && img.metadata);
+
+  // Intelligent Format Recommendation
+  const formatRecommendation = (() => {
+    if (!selectedImage) return '.png';
+    const type = selectedImage.file.type;
+    
+    if (viewMode === 'pngtree') return '.png';
+    if (type === 'image/svg+xml') return '.svg';
+    if (type === 'image/png') return '.png';
+    if (type === 'image/jpeg' || type === 'image/jpg') return '.jpg';
+    return '.eps';
+  })();
+
+  useEffect(() => {
+    setExportExtension(formatRecommendation);
+  }, [formatRecommendation, setExportExtension, selectedImage?.id]);
 
   if (!selectedImage) {
     return (
@@ -92,8 +119,8 @@ export function MetadataPanel({
       <div className="p-4 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className={cn(
-            "w-10 h-10 rounded-xl overflow-hidden shadow-sm border border-white relative",
-            viewMode === 'pngtree' && "bg-[url('https://www.transparenttextures.com/patterns/checkerboard.png')] bg-repeat"
+            "w-16 h-16 rounded-xl overflow-hidden shadow-sm border border-white relative shrink-0",
+            (viewMode === 'pngtree' || selectedImage.file.type === 'image/png') && "bg-transparency-pattern"
           )}>
             <img src={selectedImage.preview} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
           </div>
@@ -135,9 +162,9 @@ export function MetadataPanel({
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Metadata Actions</h4>
-                {!isEditing && viewMode === 'standard' && (
+                {!isEditing && (
                   <button 
-                    onClick={() => setIsEditing(true)}
+                    onClick={startEditing}
                     className="flex items-center gap-1.5 text-[10px] font-bold text-indigo-600 hover:text-indigo-700 bg-indigo-50 px-2.5 py-1.5 rounded-lg transition-colors"
                     id="btn-edit-metadata"
                   >
@@ -146,73 +173,75 @@ export function MetadataPanel({
                 )}
               </div>
               
-              <AnimatePresence mode="wait">
-                {activeDownloadMenu ? (
-                  <motion.div 
-                    initial={{ opacity: 0, y: 5 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: 5 }}
-                    className="p-4 bg-indigo-600 rounded-2xl shadow-lg shadow-indigo-200 space-y-4"
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-black text-white/60 uppercase tracking-widest">Pilih Ekstensi ({activeDownloadMenu.type})</span>
-                      <button onClick={() => setActiveDownloadMenu(null)} className="text-white/60 hover:text-white"><ChevronRight className="w-4 h-4 rotate-180" /></button>
-                    </div>
-                    <div className="flex gap-2">
-                      {(['.eps', '.jpg', '.png'] as const).map((ext) => (
-                        <button
-                          key={ext}
-                          onClick={() => setExportExtension(ext)}
-                          className={cn(
-                            "flex-1 py-2.5 rounded-xl text-sm font-bold transition-all border",
-                            exportExtension === ext
-                              ? "bg-indigo-50 border-indigo-200 text-indigo-700"
-                              : "bg-white border-slate-100 text-slate-500 hover:bg-slate-50"
-                          )}
-                        >
-                          {ext}
-                        </button>
-                      ))}
-                    </div>
+              <div className="space-y-3">
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { id: 'freepik', label: 'Freepik', icon: <Download className="w-3.5 h-3.5 text-blue-500" />, action: () => downloadCSV([selectedImage]) },
+                    { id: 'adobe', label: 'Adobe Stock', icon: <Download className="w-3.5 h-3.5 text-red-500" />, action: () => setActiveDownloadMenu({ type: 'adobe', targetImages: [selectedImage] }) },
+                    { id: 'shutterstock', label: 'Shutterstock', icon: <Download className="w-3.5 h-3.5 text-amber-500" />, action: () => setActiveDownloadMenu({ type: 'shutterstock', targetImages: [selectedImage] }) }
+                  ].map((p) => (
                     <button
-                      onClick={() => {
-                        if (activeDownloadMenu.type === 'adobe') downloadAdobeStockCSV([selectedImage]);
-                        else downloadShutterstockCSV([selectedImage]);
-                        setActiveDownloadMenu(null);
-                      }}
-                      className="w-full py-3 bg-white text-indigo-600 rounded-xl text-sm font-bold hover:bg-indigo-50 flex items-center justify-center gap-2"
-                      id="btn-confirm-download"
+                      key={p.id}
+                      onClick={p.action}
+                      className={cn(
+                        "px-3 py-2 bg-white border border-slate-200 text-slate-700 rounded-xl text-[11px] font-bold shadow-xs hover:border-indigo-300 hover:bg-slate-50 flex items-center gap-2 transition-all active:scale-95",
+                        activeDownloadMenu?.type === p.id && "border-indigo-500 bg-indigo-50/50 ring-2 ring-indigo-50"
+                      )}
                     >
-                      <Download className="w-4 h-4" />
-                      Download CSV
+                      {p.icon}
+                      {p.label}
                     </button>
-                  </motion.div>
-                ) : (
-                  <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-wrap gap-2">
-                    <button
-                      onClick={() => downloadCSV([selectedImage])}
-                      className="px-4 py-2.5 bg-white border border-slate-200 text-indigo-600 rounded-xl text-xs font-bold shadow-sm hover:bg-slate-50 flex items-center gap-2"
-                      id="btn-download-freepik"
+                  ))}
+                </div>
+
+                <AnimatePresence>
+                  {activeDownloadMenu && (
+                    <motion.div 
+                      initial={{ opacity: 0, scale: 0.95, y: -5 }}
+                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.95, y: -5 }}
+                      className="p-3 bg-slate-50 border border-slate-200 rounded-2xl flex flex-col gap-3"
                     >
-                      <Download className="w-4 h-4" /> Freepik
-                    </button>
-                    <button
-                      onClick={() => setActiveDownloadMenu({ type: 'adobe', targetImages: [selectedImage] })}
-                      className="px-4 py-2.5 bg-white border border-slate-200 text-indigo-600 rounded-xl text-xs font-bold shadow-sm hover:bg-slate-50 flex items-center gap-2"
-                      id="btn-download-adobe"
-                    >
-                      <Download className="w-4 h-4" /> Adobe Stock
-                    </button>
-                    <button
-                      onClick={() => setActiveDownloadMenu({ type: 'shutterstock', targetImages: [selectedImage] })}
-                      className="px-4 py-2.5 bg-white border border-slate-200 text-indigo-600 rounded-xl text-xs font-bold shadow-sm hover:bg-slate-50 flex items-center gap-2"
-                      id="btn-download-shutterstock"
-                    >
-                      <Download className="w-4 h-4" /> Shutterstock
-                    </button>
-                  </motion.div>
-                )}
-              </AnimatePresence>
+                      <div className="flex items-center justify-between">
+                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Pilih Format ({activeDownloadMenu.type})</span>
+                        <button onClick={() => setActiveDownloadMenu(null)} className="text-slate-400 hover:text-slate-600"><X className="w-3 h-3" /></button>
+                      </div>
+                      <div className="flex gap-1.5 overflow-x-auto pb-1 custom-scrollbar">
+                        {(['.eps', '.jpg', '.png', '.svg'] as const).map((ext) => {
+                          const isRecommended = formatRecommendation === ext;
+                          return (
+                            <button
+                              key={ext}
+                              onClick={() => setExportExtension(ext)}
+                              className={cn(
+                                "whitespace-nowrap px-3 py-1.5 rounded-lg text-[10px] font-bold border transition-all relative",
+                                exportExtension === ext
+                                  ? "bg-indigo-600 border-indigo-600 text-white shadow-sm"
+                                  : cn("bg-white border-slate-200 text-slate-500 hover:bg-slate-50", isRecommended && "border-indigo-200 bg-indigo-50/50")
+                              )}
+                            >
+                              {ext}
+                              {isRecommended && exportExtension !== ext && (
+                                <span className="absolute -top-1.5 -right-1 px-1 bg-indigo-500 text-[6px] text-white rounded-full uppercase">Best</span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <button
+                        onClick={() => {
+                          if (activeDownloadMenu.type === 'adobe') downloadAdobeStockCSV([selectedImage]);
+                          else if (activeDownloadMenu.type === 'shutterstock') downloadShutterstockCSV([selectedImage]);
+                          setActiveDownloadMenu(null);
+                        }}
+                        className="w-full py-2 bg-indigo-600 text-white rounded-xl text-[11px] font-bold hover:bg-indigo-700 flex items-center justify-center gap-2 shadow-md shadow-indigo-100"
+                      >
+                        <Download className="w-3 h-3" /> Download CSV
+                      </button>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
             </div>
 
             {/* Metadata Forms */}
@@ -317,18 +346,28 @@ export function MetadataPanel({
                             <div className="w-1.5 h-1.5 rounded-full bg-indigo-500"></div>
                             <label className="text-[10px] uppercase font-black text-slate-500 tracking-widest">1. Title</label>
                           </div>
-                          <button 
-                            onClick={() => copyToClipboard(selectedImage.metadata!.pngTree!.title, 'pt-title')} 
-                            className="flex items-center gap-2 px-3 py-1 bg-slate-50 hover:bg-indigo-50 rounded-lg border border-slate-100 text-slate-400 hover:text-indigo-600 transition-all group"
-                            id="btn-copy-pt-title"
-                          >
-                            <span className="text-[9px] font-bold uppercase group-hover:block transition-all">Copy</span>
-                            {copiedField === 'pt-title' ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
-                          </button>
+                          {!isEditing && (
+                            <button 
+                              onClick={() => copyToClipboard(selectedImage.metadata!.pngTree!.title, 'pt-title')} 
+                              className="flex items-center gap-2 px-3 py-1 bg-slate-50 hover:bg-indigo-50 rounded-lg border border-slate-100 text-slate-400 hover:text-indigo-600 transition-all group"
+                              id="btn-copy-pt-title"
+                            >
+                              <span className="text-[9px] font-bold uppercase group-hover:block transition-all">Copy</span>
+                              {copiedField === 'pt-title' ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
+                            </button>
+                          )}
                         </div>
-                        <div className="p-4 bg-white border border-slate-100 rounded-2xl text-slate-800 font-bold text-sm shadow-sm">
-                          {selectedImage.metadata.pngTree.title}
-                        </div>
+                        {isEditing ? (
+                          <input 
+                            value={editData?.title || ''}
+                            onChange={(e) => setEditData((p: any) => p ? {...p, title: e.target.value} : null)}
+                            className="w-full p-3 bg-white border border-indigo-200 rounded-xl text-sm focus:ring-2 ring-indigo-500/10 focus:outline-none"
+                          />
+                        ) : (
+                          <div className="p-4 bg-white border border-slate-100 rounded-2xl text-slate-800 font-bold text-sm shadow-sm">
+                            {selectedImage.metadata.pngTree.title}
+                          </div>
+                        )}
                       </div>
 
                       {/* Main Keywords */}
@@ -338,27 +377,38 @@ export function MetadataPanel({
                             <div className="w-1.5 h-1.5 rounded-full bg-indigo-500"></div>
                             <label className="text-[10px] uppercase font-black text-slate-500 tracking-widest">2. Main Keywords (2-3)</label>
                           </div>
-                          <button 
-                            onClick={() => copyToClipboard(selectedImage.metadata!.pngTree!.mainKeywords.join(', '), 'pt-main-keys')} 
-                            className="flex items-center gap-2 px-3 py-1 bg-slate-50 hover:bg-indigo-50 rounded-lg border border-slate-100 text-slate-400 hover:text-indigo-600 transition-all group"
-                            id="btn-copy-pt-main-keys"
-                          >
-                            <span className="text-[9px] font-bold uppercase group-hover:block transition-all">Copy All</span>
-                            {copiedField === 'pt-main-keys' ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
-                          </button>
-                        </div>
-                        <div className="flex flex-wrap gap-2 p-4 bg-indigo-50/30 border border-indigo-100/50 rounded-2xl">
-                          {selectedImage.metadata.pngTree.mainKeywords.map((k, i) => (
+                          {!isEditing && (
                             <button 
-                              key={i} 
-                              onClick={() => copyToClipboard(k, `pt-mkey-${i}`)}
-                              className="px-3 py-1.5 bg-white border border-indigo-100 rounded-xl text-xs font-bold text-indigo-700 shadow-xs flex items-center gap-2 hover:border-indigo-400 group"
+                              onClick={() => copyToClipboard(selectedImage.metadata!.pngTree!.mainKeywords.join(', '), 'pt-main-keys')} 
+                              className="flex items-center gap-2 px-3 py-1 bg-slate-50 hover:bg-indigo-50 rounded-lg border border-slate-100 text-slate-400 hover:text-indigo-600 transition-all group"
+                              id="btn-copy-pt-main-keys"
                             >
-                              {k}
-                              {copiedField === `pt-mkey-${i}` ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-2.5 h-2.5 opacity-0 group-hover:opacity-100 transition-opacity" />}
+                              <span className="text-[9px] font-bold uppercase group-hover:block transition-all">Copy All</span>
+                              {copiedField === 'pt-main-keys' ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
                             </button>
-                          ))}
+                          )}
                         </div>
+                        {isEditing ? (
+                          <input 
+                            value={editData?.ptMainKeywords || ''}
+                            onChange={(e) => setEditData((p: any) => p ? {...p, ptMainKeywords: e.target.value} : null)}
+                            placeholder="Keywords separated by commas"
+                            className="w-full p-3 bg-white border border-indigo-200 rounded-xl text-sm focus:ring-2 ring-indigo-500/10 focus:outline-none"
+                          />
+                        ) : (
+                          <div className="flex flex-wrap gap-2 p-4 bg-indigo-50/30 border border-indigo-100/50 rounded-2xl">
+                            {selectedImage.metadata.pngTree.mainKeywords.map((k, i) => (
+                              <button 
+                                key={i} 
+                                onClick={() => copyToClipboard(k, `pt-mkey-${i}`)}
+                                className="px-3 py-1.5 bg-white border border-indigo-100 rounded-xl text-xs font-bold text-indigo-700 shadow-xs flex items-center gap-2 hover:border-indigo-400 group"
+                              >
+                                {k}
+                                {copiedField === `pt-mkey-${i}` ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-2.5 h-2.5 opacity-0 group-hover:opacity-100 transition-opacity" />}
+                              </button>
+                            ))}
+                          </div>
+                        )}
                       </div>
 
                       {/* Secondary Keywords */}
@@ -368,27 +418,39 @@ export function MetadataPanel({
                             <div className="w-1.5 h-1.5 rounded-full bg-indigo-500"></div>
                             <label className="text-[10px] uppercase font-black text-slate-500 tracking-widest">3. Secondary Keywords ({selectedImage.metadata.pngTree.secondaryKeywords.length}/50)</label>
                           </div>
-                          <button 
-                            onClick={() => copyToClipboard(selectedImage.metadata!.pngTree!.secondaryKeywords.join(', '), 'pt-sec-keys')} 
-                            className="flex items-center gap-2 px-3 py-1 bg-slate-50 hover:bg-indigo-50 rounded-lg border border-slate-100 text-slate-400 hover:text-indigo-600 transition-all group"
-                            id="btn-copy-pt-sec-keys"
-                          >
-                            <span className="text-[9px] font-bold uppercase group-hover:block transition-all">Copy All</span>
-                            {copiedField === 'pt-sec-keys' ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
-                          </button>
+                          {!isEditing && (
+                            <button 
+                              onClick={() => copyToClipboard(selectedImage.metadata!.pngTree!.secondaryKeywords.join(', '), 'pt-sec-keys')} 
+                              className="flex items-center gap-2 px-3 py-1 bg-slate-50 hover:bg-indigo-50 rounded-lg border border-slate-100 text-slate-400 hover:text-indigo-600 transition-all group"
+                              id="btn-copy-pt-sec-keys"
+                            >
+                              <span className="text-[9px] font-bold uppercase group-hover:block transition-all">Copy All</span>
+                              {copiedField === 'pt-sec-keys' ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
+                            </button>
+                          )}
                         </div>
-                        <div className="p-4 bg-white border border-slate-100 rounded-2xl min-h-[100px]">
-                          <div className="flex flex-wrap gap-1.5">
-                            {selectedImage.metadata.pngTree.secondaryKeywords.map((k, i) => (
-                              <span key={i} className="px-2 py-0.5 bg-slate-50 text-slate-500 rounded text-[10px] border border-slate-100">
-                                {k}
-                              </span>
-                            ))}
-                            {selectedImage.metadata.pngTree.secondaryKeywords.length === 0 && (
-                              <span className="text-[10px] italic text-slate-400">Tidak ada kata kunci sekunder.</span>
-                            )}
+                        {isEditing ? (
+                          <textarea 
+                            rows={4}
+                            value={editData?.ptSecondaryKeywords || ''}
+                            onChange={(e) => setEditData((p: any) => p ? {...p, ptSecondaryKeywords: e.target.value} : null)}
+                            placeholder="Keywords separated by commas"
+                            className="w-full p-3 bg-white border border-indigo-200 rounded-xl text-sm focus:ring-2 ring-indigo-500/10 focus:outline-none resize-none"
+                          />
+                        ) : (
+                          <div className="p-4 bg-white border border-slate-100 rounded-2xl min-h-[100px]">
+                            <div className="flex flex-wrap gap-1.5">
+                              {selectedImage.metadata.pngTree.secondaryKeywords.map((k, i) => (
+                                <span key={i} className="px-2 py-0.5 bg-slate-50 text-slate-500 rounded text-[10px] border border-slate-100">
+                                  {k}
+                                </span>
+                              ))}
+                              {selectedImage.metadata.pngTree.secondaryKeywords.length === 0 && (
+                                <span className="text-[10px] italic text-slate-400">Tidak ada kata kunci sekunder.</span>
+                              )}
+                            </div>
                           </div>
-                        </div>
+                        )}
                       </div>
 
                       {/* Main Copy */}
@@ -398,18 +460,29 @@ export function MetadataPanel({
                             <div className="w-1.5 h-1.5 rounded-full bg-indigo-500"></div>
                             <label className="text-[10px] uppercase font-black text-slate-500 tracking-widest">4. Main Copy / Text Content</label>
                           </div>
-                          <button 
-                            onClick={() => copyToClipboard(selectedImage.metadata!.pngTree!.mainCopy, 'pt-copy')} 
-                            className="flex items-center gap-2 px-3 py-1 bg-slate-50 hover:bg-indigo-50 rounded-lg border border-slate-100 text-slate-400 hover:text-indigo-600 transition-all group"
-                            id="btn-copy-pt-copy"
-                          >
-                            <span className="text-[9px] font-bold uppercase group-hover:block transition-all">Copy</span>
-                            {copiedField === 'pt-copy' ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
-                          </button>
+                          {!isEditing && (
+                            <button 
+                              onClick={() => copyToClipboard(selectedImage.metadata!.pngTree!.mainCopy, 'pt-copy')} 
+                              className="flex items-center gap-2 px-3 py-1 bg-slate-50 hover:bg-indigo-50 rounded-lg border border-slate-100 text-slate-400 hover:text-indigo-600 transition-all group"
+                              id="btn-copy-pt-copy"
+                            >
+                              <span className="text-[9px] font-bold uppercase group-hover:block transition-all">Copy</span>
+                              {copiedField === 'pt-copy' ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
+                            </button>
+                          )}
                         </div>
-                        <div className="p-4 bg-slate-800 text-slate-300 rounded-2xl text-xs font-mono border border-slate-700 shadow-inner">
-                          {selectedImage.metadata.pngTree.mainCopy || "No text detected."}
-                        </div>
+                        {isEditing ? (
+                          <textarea 
+                            rows={3}
+                            value={editData?.ptMainCopy || ''}
+                            onChange={(e) => setEditData((p: any) => p ? {...p, ptMainCopy: e.target.value} : null)}
+                            className="w-full p-3 bg-white border border-indigo-200 rounded-xl text-sm focus:ring-2 ring-indigo-500/10 focus:outline-none resize-none"
+                          />
+                        ) : (
+                          <div className="p-4 bg-slate-800 text-slate-300 rounded-2xl text-xs font-mono border border-slate-700 shadow-inner">
+                            {selectedImage.metadata.pngTree.mainCopy || "No text detected."}
+                          </div>
+                        )}
                       </div>
                     </>
                   ) : (
@@ -432,7 +505,7 @@ export function MetadataPanel({
               )}
             </div>
 
-            {isEditing && viewMode === 'standard' && (
+            {isEditing && (
               <div className="flex gap-2 pt-4">
                 <button onClick={() => setIsEditing(false)} className="flex-1 py-2.5 rounded-xl text-sm font-bold text-slate-500 hover:bg-slate-50 transition-colors">Batal</button>
                 <button onClick={saveEdit} className="flex-1 py-2.5 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 shadow-lg shadow-indigo-100">Simpan</button>

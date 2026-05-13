@@ -10,6 +10,7 @@ import {
   Sparkles,
   Download 
 } from 'lucide-react';
+import { useEffect } from 'react';
 import { cn } from '../lib/utils';
 import { ImageData } from '../types';
 
@@ -59,6 +60,26 @@ export function AssetGrid({
   downloadShutterstockCSV
 }: AssetGridProps) {
   const completedImages = images.filter(img => img.status === 'completed' && img.metadata);
+  
+  // Intelligent Format Recommendation
+  const formatRecommendation = (() => {
+    if (completedImages.length === 0) return '.png';
+    const formats = completedImages.map(img => img.file.type);
+    const pngCount = formats.filter(f => f === 'image/png').length;
+    const svgCount = formats.filter(f => f === 'image/svg+xml').length;
+    const jpgCount = formats.filter(f => f === 'image/jpeg' || f === 'image/jpg').length;
+    
+    if (viewMode === 'pngtree') return '.png'; 
+    if (svgCount > 0) return '.svg';
+    if (pngCount > jpgCount) return '.png';
+    if (jpgCount > 0) return '.jpg';
+    return '.eps'; // Default for vectors/others
+  })();
+
+  useEffect(() => {
+    setExportExtension(formatRecommendation);
+  }, [formatRecommendation, setExportExtension]);
+
   return (
     <div className="space-y-6">
       {/* Persistent Upload Area */}
@@ -79,6 +100,96 @@ export function AssetGrid({
         <p className="text-[10px] text-slate-500 mt-0.5">Seret atau klik untuk upload</p>
       </div>
 
+      {/* Batch Download Hub - Moved to top for quick access */}
+      <div className="bg-white/40 backdrop-blur-md rounded-3xl border border-slate-200 overflow-hidden flex flex-col shadow-sm">
+        <div className="p-3 bg-indigo-600/10 border-b border-indigo-100/50 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Download className="w-3.5 h-3.5 text-indigo-600" />
+            <h3 className="text-[10px] font-black text-indigo-700 uppercase tracking-widest">Batch Download Hub</h3>
+          </div>
+          <span className="px-2 py-0.5 bg-indigo-600 text-white rounded-full text-[8px] font-black">
+            {completedImages.length} READY
+          </span>
+        </div>
+        
+        <div className="p-4 space-y-4">
+          {completedImages.length > 0 ? (
+            <>
+              <div className="space-y-2">
+                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tight">Format Export:</span>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {(['.eps', '.jpg', '.png', '.svg'] as const).map((ext) => {
+                    const isRecommended = formatRecommendation === ext;
+                    return (
+                      <button
+                        key={ext}
+                        onClick={() => setExportExtension(ext)}
+                        className={cn(
+                          "relative py-2 rounded-xl text-[10px] font-black transition-all border flex flex-col items-center justify-center gap-0.5",
+                          exportExtension === ext
+                            ? "bg-indigo-600 border-indigo-600 text-white shadow-md active:scale-95"
+                            : cn(
+                                "bg-white border-slate-200 text-slate-500 hover:border-indigo-300 hover:bg-indigo-50",
+                                isRecommended && "border-indigo-300 bg-indigo-50/50"
+                              )
+                        )}
+                      >
+                        {ext}
+                        {isRecommended && exportExtension !== ext && (
+                          <div className="absolute -top-1.5 px-1 bg-indigo-500 text-white text-[6px] rounded-full uppercase tracking-tighter">
+                            BEST
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { id: 'Freepik', label: 'Freepik', action: downloadCSV, color: 'text-blue-600', bg: 'bg-blue-50' },
+                  { id: 'Adobe', label: 'Adobe Stock', action: downloadAdobeStockCSV, color: 'text-red-600', bg: 'bg-red-50' },
+                  { id: 'Shutterstock', label: 'Shutterstock', action: downloadShutterstockCSV, color: 'text-amber-600', bg: 'bg-amber-50' }
+                ].map((p) => {
+                  return (
+                    <button
+                      key={p.id}
+                      onClick={() => p.action()}
+                      disabled={isGenerating}
+                      className={cn(
+                        "relative flex flex-col items-center gap-2 p-3 rounded-2xl border transition-all group",
+                        isGenerating 
+                          ? "opacity-40 cursor-not-allowed grayscale" 
+                          : "bg-white border-slate-200 hover:border-slate-300 hover:shadow-md active:scale-95 shadow-sm"
+                      )}
+                    >
+                      <div className={cn("w-8 h-8 rounded-xl flex items-center justify-center transition-transform group-hover:scale-110", p.bg)}>
+                        <FileText className={cn("w-4 h-4", p.color)} />
+                      </div>
+                      
+                      <div className="flex flex-col items-center">
+                        <span className="text-[9px] font-black uppercase text-slate-700 leading-none">{p.label.split(' ')[0]}</span>
+                        <span className="text-[7px] font-bold text-slate-400 mt-0.5">CSV BATCH</span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+              {isGenerating && (
+                <p className="text-[9px] text-center text-slate-400 font-medium animate-pulse">
+                  Tunggu proses generate selesai untuk mendownload...
+                </p>
+              )}
+            </>
+          ) : (
+            <div className="py-4 flex flex-col items-center text-center">
+              <p className="text-[10px] text-slate-400 font-medium italic">Belum ada hasil generate untuk didownload.</p>
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* Grid Image Gallery */}
       {images.length > 0 && (
         <div className="bg-white/40 backdrop-blur-md rounded-3xl border border-slate-200 p-4 sm:p-6 space-y-4">
@@ -97,7 +208,7 @@ export function AssetGrid({
                 {img.file.type.startsWith('image/') ? (
                   <div className={cn(
                     "w-full h-full relative",
-                    viewMode === 'pngtree' && "bg-[url('https://www.transparenttextures.com/patterns/checkerboard.png')] bg-repeat"
+                    (viewMode === 'pngtree' || img.file.type === 'image/png') && "bg-transparency-pattern"
                   )}>
                     <img src={img.preview} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                   </div>
@@ -201,70 +312,6 @@ export function AssetGrid({
           </button>
         </div>
       )}
-
-      {/* Batch Download Hub - Now on the left below image list/settings */}
-      <div className="bg-white/40 backdrop-blur-md rounded-3xl border border-slate-200 overflow-hidden flex flex-col shadow-sm">
-        <div className="p-3 bg-indigo-600/10 border-b border-indigo-100/50 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Download className="w-3.5 h-3.5 text-indigo-600" />
-            <h3 className="text-[10px] font-black text-indigo-700 uppercase tracking-widest">Batch Download Hub</h3>
-          </div>
-          <span className="px-2 py-0.5 bg-indigo-600 text-white rounded-full text-[8px] font-black">
-            {completedImages.length} READY
-          </span>
-        </div>
-        
-        <div className="p-4 space-y-4">
-          {completedImages.length > 0 ? (
-            <>
-              <div className="space-y-2">
-                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tight">Format Export:</span>
-                <div className="flex gap-1.5">
-                  {(['.eps', '.jpg', '.png'] as const).map((ext) => (
-                    <button
-                      key={ext}
-                      onClick={() => setExportExtension(ext)}
-                      className={cn(
-                        "flex-1 py-1.5 rounded-lg text-[10px] font-bold transition-all border",
-                        exportExtension === ext
-                          ? "bg-indigo-600 border-indigo-600 text-white shadow-sm"
-                          : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"
-                      )}
-                    >
-                      {ext}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 gap-2">
-                <button 
-                  onClick={() => downloadCSV()}
-                  className="w-full py-2.5 bg-white border border-slate-200 rounded-xl text-[10px] font-bold text-indigo-600 hover:bg-slate-50 transition-all flex items-center justify-center gap-1.5 shadow-xs"
-                >
-                  <Download className="w-3 h-3" /> Freepik Batch
-                </button>
-                <button 
-                  onClick={() => downloadAdobeStockCSV()}
-                  className="w-full py-2.5 bg-white border border-slate-200 rounded-xl text-[10px] font-bold text-indigo-600 hover:bg-slate-50 transition-all flex items-center justify-center gap-1.5 shadow-xs"
-                >
-                  <Download className="w-3 h-3" /> Adobe Batch
-                </button>
-                <button 
-                  onClick={() => downloadShutterstockCSV()}
-                  className="w-full py-2.5 bg-white border border-slate-200 rounded-xl text-[10px] font-bold text-indigo-600 hover:bg-slate-50 transition-all flex items-center justify-center gap-1.5 shadow-xs"
-                >
-                  <Download className="w-3 h-3" /> Shutterstock Batch
-                </button>
-              </div>
-            </>
-          ) : (
-            <div className="py-4 flex flex-col items-center text-center">
-              <p className="text-[10px] text-slate-400 font-medium italic">Belum ada hasil generate untuk didownload.</p>
-            </div>
-          )}
-        </div>
-      </div>
     </div>
   );
 }

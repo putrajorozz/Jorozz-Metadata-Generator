@@ -66,6 +66,23 @@ export default function App() {
   const dropdownRef = useRef<HTMLDivElement>(null);
   const singleDropdownRef = useRef<HTMLDivElement>(null);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
+  
+  // Audio Refs
+  const chimeAudio = useRef<HTMLAudioElement | null>(null);
+  const successAudio = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    chimeAudio.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+    successAudio.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2013/2013-preview.mp3');
+    
+    // Low volume for chime
+    if (chimeAudio.current) chimeAudio.current.volume = 0.4;
+    if (successAudio.current) successAudio.current.volume = 0.5;
+  }, []);
+
+  const playChime = () => chimeAudio.current?.play().catch(() => {});
+  const playSuccess = () => successAudio.current?.play().catch(() => {});
+
   const [apiKeys, setApiKeys] = useState<string[]>(() => {
     const saved = localStorage.getItem('gemini_api_keys');
     return saved ? JSON.parse(saved) : [];
@@ -97,7 +114,14 @@ export default function App() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   
   const [isEditing, setIsEditing] = useState(false);
-  const [editData, setEditData] = useState<{ title: string; description: string; keywords: string } | null>(null);
+  const [editData, setEditData] = useState<{ 
+    title: string; 
+    description: string; 
+    keywords: string;
+    ptMainKeywords?: string;
+    ptSecondaryKeywords?: string;
+    ptMainCopy?: string;
+  } | null>(null);
   const [expandedLogs, setExpandedLogs] = useState<string[]>([CHANGELOG_DATA[0].id]);
   const [showBulkOptions, setShowBulkOptions] = useState(false);
   const [showSettingsPanel, setShowSettingsPanel] = useState(() => {
@@ -128,7 +152,10 @@ export default function App() {
       setEditData({
         title: selectedImage.metadata.title,
         description: selectedImage.metadata.description,
-        keywords: selectedImage.metadata.keywords.join(', ')
+        keywords: selectedImage.metadata.keywords.join(', '),
+        ptMainKeywords: selectedImage.metadata.pngTree?.mainKeywords.join(', ') || '',
+        ptSecondaryKeywords: selectedImage.metadata.pngTree?.secondaryKeywords.join(', ') || '',
+        ptMainCopy: selectedImage.metadata.pngTree?.mainCopy || ''
       });
       setIsEditing(true);
     }
@@ -140,13 +167,21 @@ export default function App() {
       
       const updatedImage = images.find(img => img.id === selectedId);
       if (updatedImage && updatedImage.metadata) {
+        const pngTreeData = updatedImage.metadata.pngTree ? {
+          title: editData.title,
+          mainKeywords: editData.ptMainKeywords ? editData.ptMainKeywords.split(',').map(k => k.trim()).filter(k => k !== '') : updatedImage.metadata.pngTree.mainKeywords,
+          secondaryKeywords: editData.ptSecondaryKeywords ? editData.ptSecondaryKeywords.split(',').map(k => k.trim()).filter(k => k !== '') : updatedImage.metadata.pngTree.secondaryKeywords,
+          mainCopy: editData.ptMainCopy ?? updatedImage.metadata.pngTree.mainCopy
+        } : undefined;
+
         const newImage = {
           ...updatedImage,
           metadata: {
             ...updatedImage.metadata,
             title: editData.title,
             description: editData.description,
-            keywords: keywordsArray
+            keywords: keywordsArray,
+            pngTree: pngTreeData
           }
         };
         
@@ -392,7 +427,10 @@ export default function App() {
             });
             let mimeType = img.file.type || "image/jpeg";
             
+            const isTransparent = img.file.type === 'image/png' || img.file.type === 'image/svg+xml';
+            
             const promptText = `Analyze this image for microstock metadata (Shutterstock, Adobe Stock, PNGTree, etc.). 
+                    ${isTransparent ? "IMPORTANT: This image has a TRANSPARENT background (no background). DO NOT mention 'white background', 'isolated on white', or any solid background color in the title, description, or keywords. Use 'transparent background' or 'isolated' if needed. " : ""}
                     Generate the following in JSON format:
                     - title: A catchy, descriptive title focusing on the main subject (approximately ${titleLength} characters long).
                     - description: A detailed, SEO-friendly description including context, mood, and key elements (10-20 words).
@@ -489,6 +527,7 @@ export default function App() {
             success = true;
             setActiveApiKey(null);
             addToast(`Berhasil generate: ${img.file.name}`, "success");
+            playChime(); // Play sound for each completion
             
             // Cycle to next key for next image even on success
             currentKeyIndex = (currentKeyIndex + 1) % activeKeys.length;
@@ -534,6 +573,7 @@ export default function App() {
     setActiveApiKey(null);
     if (images.every(img => img.status === 'completed')) {
       addToast("Semua gambar berhasil diproses!", "success");
+      playSuccess(); // Play batch completion sound
     }
   };
 
@@ -584,7 +624,10 @@ export default function App() {
           });
           let mimeType = img.file.type || "image/jpeg";
           
+          const isTransparent = img.file.type === 'image/png' || img.file.type === 'image/svg+xml';
+          
           const promptText = `Analyze this image for microstock metadata (Shutterstock, Adobe Stock, PNGTree, etc.). 
+                  ${isTransparent ? "IMPORTANT: This image has a TRANSPARENT background (no background). DO NOT mention 'white background', 'isolated on white', or any solid background color in the title, description, or keywords. Use 'transparent background' or 'isolated' if needed. " : ""}
                   Generate the following in JSON format:
                   - title: A catchy, descriptive title focusing on the main subject (approximately ${titleLength} characters long).
                   - description: A detailed, SEO-friendly description including context, mood, and key elements (10-20 words).
@@ -678,6 +721,7 @@ export default function App() {
           success = true;
           setActiveApiKey(null);
           addToast(`Berhasil regenerate: ${img.file.name}`, "success");
+          playChime(); // Play sound for single regeneration
         } catch (error) {
           console.error(`Error with key ${currentKeyIndex} on model ${currentModelId}:`, error);
           const failedKey = activeKeys[currentKeyIndex];
@@ -990,6 +1034,7 @@ export default function App() {
                   setViewMode={setViewMode}
                   isEditing={isEditing}
                   setIsEditing={setIsEditing}
+                  startEditing={startEditing}
                   editData={editData}
                   setEditData={setEditData}
                   copyToClipboard={copyToClipboard}
