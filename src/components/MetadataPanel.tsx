@@ -301,7 +301,7 @@ export function MetadataPanel({
                                     else if (p.id === 'dreamstime') downloadWithMetadata([selectedImage]);
                                     setActiveDownloadMenu(null);
                                   }}
-                                  className="w-full py-2 bg-indigo-600 text-white rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center justify-center gap-2 shadow-md shadow-indigo-100 hover:bg-indigo-700 active:scale-95 transition-all"
+                                  className="w-full py-2.5 bg-indigo-600 text-white rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center justify-center gap-2 shadow-md shadow-indigo-100 hover:bg-indigo-500 hover:scale-[1.02] hover:-translate-y-0.5 active:scale-95 transition-all duration-200"
                                 >
                                   {p.id === 'dreamstime' ? <Sparkles className="w-3 h-3" /> : <Download className="w-3 h-3" />}
                                   {p.id === 'dreamstime' ? "Download Image" : "Download"}

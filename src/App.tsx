@@ -38,6 +38,7 @@ import { cn } from './lib/utils';
 import { TopHeader } from './components/TopHeader';
 import { AssetGrid } from './components/AssetGrid';
 import { MetadataPanel } from './components/MetadataPanel';
+import { BatchDownloadHub } from './components/BatchDownloadHub';
 
 // Import constants and types
 import { MODELS, CHANGELOG_DATA } from './constants';
@@ -1088,59 +1089,72 @@ export default function App() {
                     setTitleLength={setTitleLength}
                     keywordCount={keywordCount}
                     setKeywordCount={setKeywordCount}
-                    isGenerativeAI={isGenerativeAI}
-                    setIsGenerativeAI={setIsGenerativeAI}
-                    aiModel={aiModel}
-                    setAiModel={setAiModel}
                     generateMetadata={generateMetadata}
                     isGenerating={isGenerating}
-                    exportExtension={exportExtension}
-                    setExportExtension={setExportExtension}
-                    downloadCSV={downloadCSV}
-                    downloadAdobeStockCSV={downloadAdobeStockCSV}
-                    downloadShutterstockCSV={downloadShutterstockCSV}
-                    downloadWithMetadata={downloadWithMetadata}
-                    activePlatform={activePlatform}
-                    setActivePlatform={setActivePlatform}
                   />
                 </div>
 
-                <div className={cn(
-                  "transition-all duration-300",
-                  activeDownloadMenu ? "z-[60] relative" : "z-10 relative"
-                )}>
-                  <MetadataPanel 
-                    selectedImage={selectedImage}
-                    setSelectedId={setSelectedId}
-                    viewMode={viewMode}
-                    setViewMode={setViewMode}
-                    isEditing={isEditing}
-                    setIsEditing={setIsEditing}
-                    startEditing={startEditing}
-                    editData={editData}
-                    setEditData={setEditData}
-                    copyToClipboard={copyToClipboard}
-                    copiedField={copiedField}
-                    saveEdit={saveEdit}
-                    generateMetadata={generateMetadata}
-                    isGenerating={isGenerating}
-                    selectedModel={selectedModel}
-                    regenerateSingleMetadata={regenerateSingleMetadata}
-                    activeDownloadMenu={activeDownloadMenu}
-                    setActiveDownloadMenu={setActiveDownloadMenu}
-                    exportExtension={exportExtension}
-                    setExportExtension={setExportExtension}
-                    downloadCSV={downloadCSV}
-                    isGenerativeAI={isGenerativeAI}
-                    setIsGenerativeAI={setIsGenerativeAI}
-                    aiModel={aiModel}
-                    setAiModel={setAiModel}
-                    downloadAdobeStockCSV={downloadAdobeStockCSV}
-                    downloadShutterstockCSV={downloadShutterstockCSV}
-                    downloadWithMetadata={downloadWithMetadata}
-                    images={images}
-                    addToast={addToast}
-                  />
+                <div className="space-y-6">
+                  <div className={cn(
+                    "transition-all duration-300",
+                    activePlatform ? "z-[999] relative" : "z-20 relative"
+                  )}>
+                    <BatchDownloadHub 
+                      images={images}
+                      isGenerating={isGenerating}
+                      exportExtension={exportExtension}
+                      setExportExtension={setExportExtension}
+                      isGenerativeAI={isGenerativeAI}
+                      setIsGenerativeAI={setIsGenerativeAI}
+                      aiModel={aiModel}
+                      setAiModel={setAiModel}
+                      downloadCSV={downloadCSV}
+                      downloadAdobeStockCSV={downloadAdobeStockCSV}
+                      downloadShutterstockCSV={downloadShutterstockCSV}
+                      downloadWithMetadata={downloadWithMetadata}
+                      activePlatform={activePlatform}
+                      setActivePlatform={setActivePlatform}
+                      viewMode={viewMode}
+                    />
+                  </div>
+
+                  <div className={cn(
+                    "transition-all duration-300",
+                    activeDownloadMenu ? "z-[99] relative" : "z-10 relative"
+                  )}>
+                    <MetadataPanel 
+                      selectedImage={selectedImage}
+                      setSelectedId={setSelectedId}
+                      viewMode={viewMode}
+                      setViewMode={setViewMode}
+                      isEditing={isEditing}
+                      setIsEditing={setIsEditing}
+                      startEditing={startEditing}
+                      editData={editData}
+                      setEditData={setEditData}
+                      copyToClipboard={copyToClipboard}
+                      copiedField={copiedField}
+                      saveEdit={saveEdit}
+                      generateMetadata={generateMetadata}
+                      isGenerating={isGenerating}
+                      selectedModel={aiModel}
+                      regenerateSingleMetadata={regenerateSingleMetadata}
+                      activeDownloadMenu={activeDownloadMenu}
+                      setActiveDownloadMenu={setActiveDownloadMenu}
+                      exportExtension={exportExtension}
+                      setExportExtension={setExportExtension}
+                      downloadCSV={downloadCSV}
+                      isGenerativeAI={isGenerativeAI}
+                      setIsGenerativeAI={setIsGenerativeAI}
+                      aiModel={aiModel}
+                      setAiModel={setAiModel}
+                      downloadAdobeStockCSV={downloadAdobeStockCSV}
+                      downloadShutterstockCSV={downloadShutterstockCSV}
+                      downloadWithMetadata={downloadWithMetadata}
+                      images={images}
+                      addToast={addToast}
+                    />
+                  </div>
                 </div>
             </div>
           </div>
