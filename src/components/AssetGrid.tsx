@@ -40,8 +40,9 @@ interface AssetGridProps {
   downloadCSV: (images?: ImageData[]) => void;
   downloadAdobeStockCSV: (images?: ImageData[]) => void;
   downloadShutterstockCSV: (images?: ImageData[]) => void;
-  activePlatform: 'Freepik' | 'Adobe Stock' | 'Shutterstock' | null;
-  setActivePlatform: (platform: 'Freepik' | 'Adobe Stock' | 'Shutterstock' | null) => void;
+  downloadWithMetadata: (images?: ImageData[]) => void;
+  activePlatform: 'Freepik' | 'Adobe Stock' | 'Shutterstock' | 'Dreamstime' | null;
+  setActivePlatform: (platform: 'Freepik' | 'Adobe Stock' | 'Shutterstock' | 'Dreamstime' | null) => void;
 }
 
 export function AssetGrid({
@@ -69,6 +70,7 @@ export function AssetGrid({
   downloadCSV,
   downloadAdobeStockCSV,
   downloadShutterstockCSV,
+  downloadWithMetadata,
   activePlatform,
   setActivePlatform
 }: AssetGridProps) {
@@ -129,19 +131,24 @@ export function AssetGrid({
           {completedImages.length > 0 ? (
             <>
               <div className="relative">
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 {[
-                  { id: 'Freepik', label: 'Freepik', action: downloadCSV, color: 'text-blue-600', bg: 'bg-blue-50' },
-                  { id: 'Adobe', label: 'Adobe Stock', action: downloadAdobeStockCSV, color: 'text-red-600', bg: 'bg-red-50' },
-                  { id: 'Shutterstock', label: 'Shutterstock', action: downloadShutterstockCSV, color: 'text-amber-600', bg: 'bg-amber-50' }
+                  { id: 'Freepik', label: 'Freepik', action: downloadCSV, color: 'text-blue-600', bg: 'bg-blue-50', sublabel: 'CSV BATCH' },
+                  { id: 'Adobe Stock', label: 'Adobe Stock', action: downloadAdobeStockCSV, color: 'text-red-600', bg: 'bg-red-50', sublabel: 'CSV BATCH' },
+                  { id: 'Shutterstock', label: 'Shutterstock', action: downloadShutterstockCSV, color: 'text-amber-600', bg: 'bg-amber-50', sublabel: 'CSV BATCH' },
+                  { id: 'Dreamstime', label: 'Dreamstime', action: downloadWithMetadata, color: 'text-emerald-600', bg: 'bg-emerald-50', sublabel: 'IMG METADATA' }
                 ].map((p) => {
                   const isActive = activePlatform === p.label;
                   return (
                     <div key={p.id} className="relative">
                       <button
                         onClick={() => {
-                          if (isActive) setActivePlatform(null);
-                          else setActivePlatform(p.label as any);
+                          if (p.id === 'Dreamstime') {
+                            downloadWithMetadata();
+                          } else {
+                            if (isActive) setActivePlatform(null);
+                            else setActivePlatform(p.label as any);
+                          }
                         }}
                         disabled={isGenerating}
                         className={cn(
@@ -155,12 +162,12 @@ export function AssetGrid({
                         )}
                       >
                         <div className={cn("w-8 h-8 rounded-xl flex items-center justify-center transition-transform group-hover:scale-110", p.bg)}>
-                          <FileText className={cn("w-4 h-4", p.color)} />
+                          {p.id === 'Dreamstime' ? <Sparkles className={cn("w-4 h-4", p.color)} /> : <FileText className={cn("w-4 h-4", p.color)} />}
                         </div>
                         
                         <div className="flex flex-col items-center">
                           <span className="text-[9px] font-black uppercase text-slate-700 leading-none">{p.label.split(' ')[0]}</span>
-                          <span className="text-[7px] font-bold text-slate-400 mt-0.5">CSV BATCH</span>
+                          <span className="text-[7px] font-bold text-slate-400 mt-0.5">{p.sublabel}</span>
                         </div>
                       </button>
 
@@ -183,31 +190,33 @@ export function AssetGrid({
                             </div>
 
                             <div className="space-y-3">
-                              <div className="space-y-1.5">
-                                <span className="text-[8px] font-bold text-slate-400 uppercase tracking-tight px-1">Format:</span>
-                                <div className="grid grid-cols-4 gap-1.5">
-                                  {(['.eps', '.jpg', '.png', '.svg'] as const).map((ext) => {
-                                    const isRecommended = formatRecommendation === ext;
-                                    return (
-                                      <button
-                                        key={ext}
-                                        onClick={(e) => { e.stopPropagation(); setExportExtension(ext); }}
-                                        className={cn(
-                                          "relative py-1.5 rounded-lg text-[9px] font-black transition-all border flex items-center justify-center",
-                                          exportExtension === ext
-                                            ? "bg-indigo-600 border-indigo-600 text-white shadow-sm"
-                                            : cn(
-                                                "bg-white border-slate-200 text-slate-500 hover:bg-slate-50",
-                                                isRecommended && "border-indigo-200 bg-indigo-50"
-                                              )
-                                        )}
-                                      >
-                                        {ext}
-                                      </button>
-                                    );
-                                  })}
+                              {p.id !== 'Dreamstime' && (
+                                <div className="space-y-1.5">
+                                  <span className="text-[8px] font-bold text-slate-400 uppercase tracking-tight px-1">Format:</span>
+                                  <div className="grid grid-cols-4 gap-1.5">
+                                    {(['.eps', '.jpg', '.png', '.svg'] as const).map((ext) => {
+                                      const isRecommended = formatRecommendation === ext;
+                                      return (
+                                        <button
+                                          key={ext}
+                                          onClick={(e) => { e.stopPropagation(); setExportExtension(ext); }}
+                                          className={cn(
+                                            "relative py-1.5 rounded-lg text-[9px] font-black transition-all border flex items-center justify-center",
+                                            exportExtension === ext
+                                              ? "bg-indigo-600 border-indigo-600 text-white shadow-sm"
+                                              : cn(
+                                                  "bg-white border-slate-200 text-slate-500 hover:bg-slate-50",
+                                                  isRecommended && "border-indigo-200 bg-indigo-50"
+                                                )
+                                          )}
+                                        >
+                                          {ext}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
                                 </div>
-                              </div>
+                              )}
 
                               {p.label === 'Freepik' && (
                                 <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-100 space-y-2">
@@ -250,7 +259,15 @@ export function AssetGrid({
                                 }}
                                 className="w-full py-2 bg-indigo-600 text-white rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center justify-center gap-2 shadow-md shadow-indigo-100 hover:bg-indigo-700 active:scale-95 transition-all"
                               >
-                                <Download className="w-3 h-3" /> Download CSV
+                                {p.id === 'Dreamstime' ? (
+                                  <>
+                                    <Sparkles className="w-3 h-3" /> Download ZIP (Metadata)
+                                  </>
+                                ) : (
+                                  <>
+                                    <Download className="w-3 h-3" /> Download CSV
+                                  </>
+                                )}
                               </button>
                             </div>
                           </motion.div>

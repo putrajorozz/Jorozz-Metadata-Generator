@@ -40,8 +40,8 @@ interface MetadataPanelProps {
   isGenerating: boolean;
   selectedModel: string;
   regenerateSingleMetadata: (id: string) => void;
-  activeDownloadMenu: { type: 'freepik' | 'adobe' | 'shutterstock'; targetImages?: ImageData[] } | null;
-  setActiveDownloadMenu: (menu: { type: 'freepik' | 'adobe' | 'shutterstock'; targetImages?: ImageData[] } | null) => void;
+  activeDownloadMenu: { type: 'freepik' | 'adobe' | 'shutterstock' | 'dreamstime'; targetImages?: ImageData[] } | null;
+  setActiveDownloadMenu: (menu: { type: 'freepik' | 'adobe' | 'shutterstock' | 'dreamstime'; targetImages?: ImageData[] } | null) => void;
   exportExtension: string;
   setExportExtension: (ext: any) => void;
   isGenerativeAI: boolean;
@@ -51,6 +51,7 @@ interface MetadataPanelProps {
   downloadCSV: (images?: ImageData[]) => void;
   downloadAdobeStockCSV: (images?: ImageData[]) => void;
   downloadShutterstockCSV: (images?: ImageData[]) => void;
+  downloadWithMetadata: (images?: ImageData[]) => void;
   images: ImageData[];
   addToast: (message: string, type?: 'success' | 'error' | 'info') => void;
 }
@@ -83,6 +84,7 @@ export function MetadataPanel({
   downloadCSV,
   downloadAdobeStockCSV,
   downloadShutterstockCSV,
+  downloadWithMetadata,
   images,
   addToast
 }: MetadataPanelProps) {
@@ -186,15 +188,20 @@ export function MetadataPanel({
                   {[
                     { id: 'freepik', label: 'Freepik', icon: <Download className="w-3.5 h-3.5 text-blue-500" /> },
                     { id: 'adobe', label: 'Adobe Stock', icon: <Download className="w-3.5 h-3.5 text-red-500" /> },
-                    { id: 'shutterstock', label: 'Shutterstock', icon: <Download className="w-3.5 h-3.5 text-amber-500" /> }
+                    { id: 'shutterstock', label: 'Shutterstock', icon: <Download className="w-3.5 h-3.5 text-amber-500" /> },
+                    { id: 'dreamstime', label: 'Dreamstime', icon: <Sparkles className="w-3.5 h-3.5 text-emerald-500" /> }
                   ].map((p) => {
                     const isActive = activeDownloadMenu?.type === p.id;
                     return (
                       <div key={p.id} className="relative">
                         <button
                           onClick={() => {
-                            if (isActive) setActiveDownloadMenu(null);
-                            else setActiveDownloadMenu({ type: p.id as any, targetImages: [selectedImage] });
+                            if (p.id === 'dreamstime') {
+                              downloadWithMetadata([selectedImage]);
+                            } else {
+                              if (isActive) setActiveDownloadMenu(null);
+                              else setActiveDownloadMenu({ type: p.id as any, targetImages: [selectedImage] });
+                            }
                           }}
                           className={cn(
                             "px-3 py-2 bg-white border border-slate-200 text-slate-700 rounded-xl text-[11px] font-bold shadow-xs hover:border-indigo-300 hover:bg-slate-50 flex items-center gap-2 transition-all active:scale-95",
@@ -257,31 +264,33 @@ export function MetadataPanel({
                                   </div>
                                 )}
 
-                                <div className="space-y-1.5">
-                                  <span className="text-[8px] font-bold text-slate-400 uppercase tracking-tight px-1">Format:</span>
-                                  <div className="grid grid-cols-4 gap-1.5">
-                                    {(['.eps', '.jpg', '.png', '.svg'] as const).map((ext) => {
-                                      const isRecommended = formatRecommendation === ext;
-                                      return (
-                                        <button
-                                          key={ext}
-                                          onClick={(e) => { e.stopPropagation(); setExportExtension(ext); }}
-                                          className={cn(
-                                            "relative py-1.5 rounded-lg text-[9px] font-black transition-all border flex items-center justify-center",
-                                            exportExtension === ext
-                                              ? "bg-indigo-600 border-indigo-600 text-white shadow-sm"
-                                              : cn(
-                                                  "bg-white border-slate-200 text-slate-500 hover:bg-slate-50",
-                                                  isRecommended && "border-indigo-200 bg-indigo-50"
-                                                )
-                                          )}
-                                        >
-                                          {ext}
-                                        </button>
-                                      );
-                                    })}
+                                {activeDownloadMenu?.type !== 'dreamstime' && (
+                                  <div className="space-y-1.5">
+                                    <span className="text-[8px] font-bold text-slate-400 uppercase tracking-tight px-1">Format:</span>
+                                    <div className="grid grid-cols-4 gap-1.5">
+                                      {(['.eps', '.jpg', '.png', '.svg'] as const).map((ext) => {
+                                        const isRecommended = formatRecommendation === ext;
+                                        return (
+                                          <button
+                                            key={ext}
+                                            onClick={(e) => { e.stopPropagation(); setExportExtension(ext); }}
+                                            className={cn(
+                                              "relative py-1.5 rounded-lg text-[9px] font-black transition-all border flex items-center justify-center",
+                                              exportExtension === ext
+                                                ? "bg-indigo-600 border-indigo-600 text-white shadow-sm"
+                                                : cn(
+                                                    "bg-white border-slate-200 text-slate-500 hover:bg-slate-50",
+                                                    isRecommended && "border-indigo-200 bg-indigo-50"
+                                                  )
+                                            )}
+                                          >
+                                            {ext}
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
                                   </div>
-                                </div>
+                                )}
 
                                 <button
                                   onClick={(e) => {
@@ -289,11 +298,13 @@ export function MetadataPanel({
                                     if (p.id === 'adobe') downloadAdobeStockCSV([selectedImage]);
                                     else if (p.id === 'shutterstock') downloadShutterstockCSV([selectedImage]);
                                     else if (p.id === 'freepik') downloadCSV([selectedImage]);
+                                    else if (p.id === 'dreamstime') downloadWithMetadata([selectedImage]);
                                     setActiveDownloadMenu(null);
                                   }}
                                   className="w-full py-2 bg-indigo-600 text-white rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center justify-center gap-2 shadow-md shadow-indigo-100 hover:bg-indigo-700 active:scale-95 transition-all"
                                 >
-                                  <Download className="w-3 h-3" /> Download
+                                  {p.id === 'dreamstime' ? <Sparkles className="w-3 h-3" /> : <Download className="w-3 h-3" />}
+                                  {p.id === 'dreamstime' ? "Download Image" : "Download"}
                                 </button>
                               </div>
                             </motion.div>

@@ -30,6 +30,8 @@ import {
   MoreVertical
 } from 'lucide-react';
 import { GoogleGenAI, Type } from "@google/genai";
+import * as piexif from "piexifjs";
+import JSZip from "jszip";
 import { cn } from './lib/utils';
 
 // Import new components
@@ -53,13 +55,13 @@ export default function App() {
   const [titleLength, setTitleLength] = useState(100);
   const [isGenerativeAI, setIsGenerativeAI] = useState(false);
   const [aiModel, setAiModel] = useState('Google Nano Banana');
-  const [exportExtension, setExportExtension] = useState<'.eps' | '.jpg' | '.png'>('.eps');
+  const [exportExtension, setExportExtension] = useState<'.eps' | '.jpg' | '.png' | '.svg'>('.eps');
   const [exportPlatform, setExportPlatform] = useState<'Freepik' | 'Adobe' | 'Shutterstock' | null>(null);
   const [favoriteModelId, setFavoriteModelId] = useState<string | null>(() => localStorage.getItem('favorite_model_id') || null);
   const [exportScope, setExportScope] = useState<'all' | 'selected'>('all');
-  const [activePlatform, setActivePlatform] = useState<'Freepik' | 'Adobe Stock' | 'Shutterstock' | null>(null);
+  const [activePlatform, setActivePlatform] = useState<'Freepik' | 'Adobe Stock' | 'Shutterstock' | 'Dreamstime' | null>(null);
   const [activeDownloadMenu, setActiveDownloadMenu] = useState<{
-    type: 'freepik' | 'adobe' | 'shutterstock';
+    type: 'freepik' | 'adobe' | 'shutterstock' | 'dreamstime';
     targetImages?: ImageData[];
   } | null>(null);
   const [autoProcess, setAutoProcess] = useState(true);
@@ -833,6 +835,112 @@ export default function App() {
     addToast(imagesToExport.length === 1 ? "Shutterstock CSV Berhasil" : "Shutterstock Bulk Berhasil", "success");
   };
 
+  const downloadWithMetadata = async (targetImages?: ImageData[]) => {
+    const imagesToExport = targetImages || images.filter(img => img.status === 'completed' && img.metadata);
+    if (imagesToExport.length === 0) {
+      addToast("Tidak ada gambar yang siap diunduh", "error");
+      return;
+    }
+
+    const zip = new JSZip();
+    let processedCount = 0;
+    const total = imagesToExport.length;
+
+    addToast(`Menyiapkan ${total} gambar dengan metadata...`, "info");
+
+    for (const img of imagesToExport) {
+      try {
+        if (!img.file.type.includes('jpeg') && !img.file.type.includes('jpg')) {
+          // Non-JPEG handling: just add as is, piexif only supports JPEG
+          const fileData = await img.file.arrayBuffer();
+          zip.file(img.file.name, fileData);
+          processedCount++;
+          continue;
+        }
+
+        const dataUrl = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = (e) => resolve(e.target?.result as string);
+          reader.readAsDataURL(img.file);
+        });
+
+        // 1. Prepare Metadata
+        const title = img.metadata?.title || "";
+        const description = img.metadata?.description || "";
+        const keywords = (img.metadata?.keywords || []).join(", ");
+
+        // 2. Load Exif
+        const exifObj = piexif.load(dataUrl);
+
+        // 3. Set Tags in 0th IFD
+        // 270: ImageDescription
+        // 315: Artist
+        // 33432: Copyright
+        exifObj["0th"][piexif.ImageIFD.ImageDescription] = description;
+        exifObj["0th"][piexif.ImageIFD.DocumentName] = title;
+
+        // 4. Set XPKeywords (40094) - UCS2 encoded for Windows
+        const encoder = new TextEncoder();
+        const keywordsBuffer = encoder.encode(keywords);
+        const ucs2Keywords = Array.from(keywords).flatMap(char => [char.charCodeAt(0), 0]);
+        exifObj["0th"][40094] = ucs2Keywords;
+
+        // 5. UserComment (37510) in Exif IFD
+        // Needs ASCII prefix: [65, 83, 67, 73, 73, 0, 0, 0, ...]
+        const userCommentPrefix = [65, 83, 67, 73, 73, 0, 0, 0];
+        const userCommentContent = Array.from(keywords).map(c => c.charCodeAt(0));
+        exifObj["Exif"][piexif.ExifIFD.UserComment] = [...userCommentPrefix, ...userCommentContent];
+
+        // 6. Dump Exif and Insert to Image
+        const exifStr = piexif.dump(exifObj);
+        const newImageStr = piexif.insert(exifStr, dataUrl);
+
+        // 7. Convert base64 to Blob
+        const byteString = atob(newImageStr.split(',')[1]);
+        const mimeString = newImageStr.split(',')[0].split(':')[1].split(';')[0];
+        const ab = new ArrayBuffer(byteString.length);
+        const ia = new Uint8Array(ab);
+        for (let i = 0; i < byteString.length; i++) {
+          ia[i] = byteString.charCodeAt(i);
+        }
+        const blob = new Blob([ab], { type: mimeString });
+        
+        zip.file(img.file.name, blob);
+        processedCount++;
+      } catch (err) {
+        console.error(`Error embedding metadata to ${img.file.name}:`, err);
+        // Fallback: add original if error
+        const fileData = await img.file.arrayBuffer();
+        zip.file(img.file.name, fileData);
+        processedCount++;
+      }
+    }
+
+    if (total === 1) {
+      // Single download
+      const content = await zip.file(imagesToExport[0].file.name)?.async("blob");
+      if (content) {
+        const url = URL.createObjectURL(content);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = imagesToExport[0].file.name;
+        link.click();
+        URL.revokeObjectURL(url);
+        addToast("Gambar dengan metadata diunduh", "success");
+      }
+    } else {
+      // Bulk ZIP
+      const content = await zip.generateAsync({ type: "blob" });
+      const url = URL.createObjectURL(content);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `dreamstime_images_${new Date().getTime()}.zip`;
+      link.click();
+      URL.revokeObjectURL(url);
+      addToast(`Berhasil mengunduh ${total} gambar dengan metadata`, "success");
+    }
+  };
+
   const handleAddKey = () => {
     if (!newKey.trim()) return;
     
@@ -991,6 +1099,7 @@ export default function App() {
                     downloadCSV={downloadCSV}
                     downloadAdobeStockCSV={downloadAdobeStockCSV}
                     downloadShutterstockCSV={downloadShutterstockCSV}
+                    downloadWithMetadata={downloadWithMetadata}
                     activePlatform={activePlatform}
                     setActivePlatform={setActivePlatform}
                   />
@@ -1028,6 +1137,7 @@ export default function App() {
                     setAiModel={setAiModel}
                     downloadAdobeStockCSV={downloadAdobeStockCSV}
                     downloadShutterstockCSV={downloadShutterstockCSV}
+                    downloadWithMetadata={downloadWithMetadata}
                     images={images}
                     addToast={addToast}
                   />
