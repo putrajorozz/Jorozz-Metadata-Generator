@@ -723,10 +723,22 @@ export default function App() {
     }
 
     const rows = imagesToExport.map(img => {
+      // Freepik specific: title max 100 chars
+      let title = img.metadata!.title;
+      if (title.length > 100) {
+        title = title.substring(0, 100);
+      }
+
+      // Freepik specific: if AI generative is on, max 49 keywords
+      let keywordsArray = [...img.metadata!.keywords];
+      if (isGenerativeAI) {
+        keywordsArray = keywordsArray.slice(0, 49);
+      }
+
       const row = [
         img.file.name,
-        img.metadata!.title.replace(/"/g, '""'),
-        img.metadata!.keywords.join(',').replace(/"/g, '""')
+        title.replace(/"/g, '""'),
+        keywordsArray.join(',').replace(/"/g, '""')
       ];
       
       if (isGenerativeAI) {
