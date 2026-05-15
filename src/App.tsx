@@ -51,12 +51,15 @@ export default function App() {
   const [selectedModel, setSelectedModel] = useState(MODELS[0].id);
   const [keywordCount, setKeywordCount] = useState(50);
   const [titleLength, setTitleLength] = useState(100);
+  const [isGenerativeAI, setIsGenerativeAI] = useState(false);
+  const [aiModel, setAiModel] = useState('Google Nano Banana');
   const [exportExtension, setExportExtension] = useState<'.eps' | '.jpg' | '.png'>('.eps');
   const [exportPlatform, setExportPlatform] = useState<'Freepik' | 'Adobe' | 'Shutterstock' | null>(null);
   const [favoriteModelId, setFavoriteModelId] = useState<string | null>(() => localStorage.getItem('favorite_model_id') || null);
   const [exportScope, setExportScope] = useState<'all' | 'selected'>('all');
+  const [activePlatform, setActivePlatform] = useState<'Freepik' | 'Adobe Stock' | 'Shutterstock' | null>(null);
   const [activeDownloadMenu, setActiveDownloadMenu] = useState<{
-    type: 'adobe' | 'shutterstock';
+    type: 'freepik' | 'adobe' | 'shutterstock';
     targetImages?: ImageData[];
   } | null>(null);
   const [autoProcess, setAutoProcess] = useState(true);
@@ -213,11 +216,9 @@ export default function App() {
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setShowDownloadDropdown(false);
-        if (!activeDownloadMenu?.targetImages) setActiveDownloadMenu(null);
       }
       if (singleDropdownRef.current && !singleDropdownRef.current.contains(event.target as Node)) {
         setShowSingleDownloadDropdown(false);
-        if (activeDownloadMenu?.targetImages) setActiveDownloadMenu(null);
       }
       if (modelDropdownRef.current && !modelDropdownRef.current.contains(event.target as Node)) {
         setShowModelDropdown(false);
@@ -762,11 +763,9 @@ export default function App() {
     const imagesToExport = targetImages || images.filter(img => img.status === 'completed' && img.metadata);
     if (imagesToExport.length === 0) return;
 
-    const hasAiGenerated = imagesToExport.some(img => img.isAiGenerated);
-
     const headers = ["File name", "Title", "Keywords"];
-    if (hasAiGenerated) {
-      headers.push("Prompt", "Model", "AI Generated");
+    if (isGenerativeAI) {
+      headers.push("Prompt", "Model");
     }
 
     const rows = imagesToExport.map(img => {
@@ -776,16 +775,8 @@ export default function App() {
         `"${img.metadata!.keywords.join(', ').replace(/"/g, '""')}"`
       ];
       
-      if (hasAiGenerated) {
-        if (img.isAiGenerated) {
-          row.push(
-            `"${img.metadata!.prompt.replace(/"/g, '""').replace(/\n/g, ' ')}"`,
-            `"${img.metadata!.model}"`,
-            "Yes"
-          );
-        } else {
-          row.push('""', '""', '"No"');
-        }
+      if (isGenerativeAI) {
+        row.push('""', `"${aiModel.replace(/"/g, '""')}"`);
       }
       
       return row;
@@ -1004,56 +995,76 @@ export default function App() {
           <div className="flex-1 overflow-y-auto p-4 sm:p-8 custom-scrollbar pb-24 md:pb-8">
             <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-6 lg:gap-8 max-w-[1600px] mx-auto">
               
-                <AssetGrid 
-                  images={images}
-                  selectedId={selectedId}
-                  setSelectedId={setSelectedId}
-                  setImages={setImages}
-                  isDragActive={isDragActive}
-                  viewMode={viewMode}
-                  open={open}
-                  showSettingsPanel={showSettingsPanel}
-                  setShowSettingsPanel={setShowSettingsPanel}
-                  titleLength={titleLength}
-                  setTitleLength={setTitleLength}
-                  keywordCount={keywordCount}
-                  setKeywordCount={setKeywordCount}
-                  generateMetadata={generateMetadata}
-                  isGenerating={isGenerating}
-                  exportExtension={exportExtension}
-                  setExportExtension={setExportExtension}
-                  downloadCSV={downloadCSV}
-                  downloadAdobeStockCSV={downloadAdobeStockCSV}
-                  downloadShutterstockCSV={downloadShutterstockCSV}
-                />
+                <div className={cn(
+                  "transition-all duration-300",
+                  activePlatform ? "z-[60] relative" : "z-10 relative"
+                )}>
+                  <AssetGrid 
+                    images={images}
+                    selectedId={selectedId}
+                    setSelectedId={setSelectedId}
+                    setImages={setImages}
+                    isDragActive={isDragActive}
+                    viewMode={viewMode}
+                    open={open}
+                    showSettingsPanel={showSettingsPanel}
+                    setShowSettingsPanel={setShowSettingsPanel}
+                    titleLength={titleLength}
+                    setTitleLength={setTitleLength}
+                    keywordCount={keywordCount}
+                    setKeywordCount={setKeywordCount}
+                    isGenerativeAI={isGenerativeAI}
+                    setIsGenerativeAI={setIsGenerativeAI}
+                    aiModel={aiModel}
+                    setAiModel={setAiModel}
+                    generateMetadata={generateMetadata}
+                    isGenerating={isGenerating}
+                    exportExtension={exportExtension}
+                    setExportExtension={setExportExtension}
+                    downloadCSV={downloadCSV}
+                    downloadAdobeStockCSV={downloadAdobeStockCSV}
+                    downloadShutterstockCSV={downloadShutterstockCSV}
+                    activePlatform={activePlatform}
+                    setActivePlatform={setActivePlatform}
+                  />
+                </div>
 
-                <MetadataPanel 
-                  selectedImage={selectedImage}
-                  setSelectedId={setSelectedId}
-                  viewMode={viewMode}
-                  setViewMode={setViewMode}
-                  isEditing={isEditing}
-                  setIsEditing={setIsEditing}
-                  startEditing={startEditing}
-                  editData={editData}
-                  setEditData={setEditData}
-                  copyToClipboard={copyToClipboard}
-                  copiedField={copiedField}
-                  saveEdit={saveEdit}
-                  generateMetadata={generateMetadata}
-                  isGenerating={isGenerating}
-                  selectedModel={selectedModel}
-                  regenerateSingleMetadata={regenerateSingleMetadata}
-                  activeDownloadMenu={activeDownloadMenu}
-                  setActiveDownloadMenu={setActiveDownloadMenu}
-                  exportExtension={exportExtension}
-                  setExportExtension={setExportExtension}
-                  downloadCSV={downloadCSV}
-                  downloadAdobeStockCSV={downloadAdobeStockCSV}
-                  downloadShutterstockCSV={downloadShutterstockCSV}
-                  images={images}
-                  addToast={addToast}
-                />
+                <div className={cn(
+                  "transition-all duration-300",
+                  activeDownloadMenu ? "z-[60] relative" : "z-10 relative"
+                )}>
+                  <MetadataPanel 
+                    selectedImage={selectedImage}
+                    setSelectedId={setSelectedId}
+                    viewMode={viewMode}
+                    setViewMode={setViewMode}
+                    isEditing={isEditing}
+                    setIsEditing={setIsEditing}
+                    startEditing={startEditing}
+                    editData={editData}
+                    setEditData={setEditData}
+                    copyToClipboard={copyToClipboard}
+                    copiedField={copiedField}
+                    saveEdit={saveEdit}
+                    generateMetadata={generateMetadata}
+                    isGenerating={isGenerating}
+                    selectedModel={selectedModel}
+                    regenerateSingleMetadata={regenerateSingleMetadata}
+                    activeDownloadMenu={activeDownloadMenu}
+                    setActiveDownloadMenu={setActiveDownloadMenu}
+                    exportExtension={exportExtension}
+                    setExportExtension={setExportExtension}
+                    downloadCSV={downloadCSV}
+                    isGenerativeAI={isGenerativeAI}
+                    setIsGenerativeAI={setIsGenerativeAI}
+                    aiModel={aiModel}
+                    setAiModel={setAiModel}
+                    downloadAdobeStockCSV={downloadAdobeStockCSV}
+                    downloadShutterstockCSV={downloadShutterstockCSV}
+                    images={images}
+                    addToast={addToast}
+                  />
+                </div>
             </div>
           </div>
         </div>

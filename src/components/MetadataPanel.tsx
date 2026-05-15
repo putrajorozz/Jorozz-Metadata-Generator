@@ -40,10 +40,14 @@ interface MetadataPanelProps {
   isGenerating: boolean;
   selectedModel: string;
   regenerateSingleMetadata: (id: string) => void;
-  activeDownloadMenu: { type: 'adobe' | 'shutterstock'; targetImages?: ImageData[] } | null;
-  setActiveDownloadMenu: (menu: { type: 'adobe' | 'shutterstock'; targetImages?: ImageData[] } | null) => void;
+  activeDownloadMenu: { type: 'freepik' | 'adobe' | 'shutterstock'; targetImages?: ImageData[] } | null;
+  setActiveDownloadMenu: (menu: { type: 'freepik' | 'adobe' | 'shutterstock'; targetImages?: ImageData[] } | null) => void;
   exportExtension: string;
   setExportExtension: (ext: any) => void;
+  isGenerativeAI: boolean;
+  setIsGenerativeAI: (val: boolean) => void;
+  aiModel: string;
+  setAiModel: (val: string) => void;
   downloadCSV: (images?: ImageData[]) => void;
   downloadAdobeStockCSV: (images?: ImageData[]) => void;
   downloadShutterstockCSV: (images?: ImageData[]) => void;
@@ -72,6 +76,10 @@ export function MetadataPanel({
   setActiveDownloadMenu,
   exportExtension,
   setExportExtension,
+  isGenerativeAI,
+  setIsGenerativeAI,
+  aiModel,
+  setAiModel,
   downloadCSV,
   downloadAdobeStockCSV,
   downloadShutterstockCSV,
@@ -113,10 +121,10 @@ export function MetadataPanel({
     <motion.div
       initial={{ opacity: 0, scale: 0.98 }}
       animate={{ opacity: 1, scale: 1 }}
-      className="bg-white rounded-3xl border border-slate-200 shadow-xl overflow-hidden flex flex-col h-full min-h-[500px]"
+      className="bg-white rounded-3xl border border-slate-200 shadow-xl flex flex-col h-full min-h-[500px] relative transition-all"
     >
       {/* Detail Header */}
-      <div className="p-4 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
+      <div className="p-4 bg-slate-50 border-b border-slate-100 flex items-center justify-between rounded-t-3xl">
         <div className="flex items-center gap-3">
           <div className={cn(
             "w-16 h-16 rounded-xl overflow-hidden shadow-sm border border-white relative shrink-0",
@@ -173,74 +181,128 @@ export function MetadataPanel({
                 )}
               </div>
               
-              <div className="space-y-3">
+              <div className="space-y-3 relative">
                 <div className="flex flex-wrap gap-2">
                   {[
-                    { id: 'freepik', label: 'Freepik', icon: <Download className="w-3.5 h-3.5 text-blue-500" />, action: () => downloadCSV([selectedImage]) },
-                    { id: 'adobe', label: 'Adobe Stock', icon: <Download className="w-3.5 h-3.5 text-red-500" />, action: () => setActiveDownloadMenu({ type: 'adobe', targetImages: [selectedImage] }) },
-                    { id: 'shutterstock', label: 'Shutterstock', icon: <Download className="w-3.5 h-3.5 text-amber-500" />, action: () => setActiveDownloadMenu({ type: 'shutterstock', targetImages: [selectedImage] }) }
-                  ].map((p) => (
-                    <button
-                      key={p.id}
-                      onClick={p.action}
-                      className={cn(
-                        "px-3 py-2 bg-white border border-slate-200 text-slate-700 rounded-xl text-[11px] font-bold shadow-xs hover:border-indigo-300 hover:bg-slate-50 flex items-center gap-2 transition-all active:scale-95",
-                        activeDownloadMenu?.type === p.id && "border-indigo-500 bg-indigo-50/50 ring-2 ring-indigo-50"
-                      )}
-                    >
-                      {p.icon}
-                      {p.label}
-                    </button>
-                  ))}
-                </div>
+                    { id: 'freepik', label: 'Freepik', icon: <Download className="w-3.5 h-3.5 text-blue-500" /> },
+                    { id: 'adobe', label: 'Adobe Stock', icon: <Download className="w-3.5 h-3.5 text-red-500" /> },
+                    { id: 'shutterstock', label: 'Shutterstock', icon: <Download className="w-3.5 h-3.5 text-amber-500" /> }
+                  ].map((p) => {
+                    const isActive = activeDownloadMenu?.type === p.id;
+                    return (
+                      <div key={p.id} className="relative">
+                        <button
+                          onClick={() => {
+                            if (isActive) setActiveDownloadMenu(null);
+                            else setActiveDownloadMenu({ type: p.id as any, targetImages: [selectedImage] });
+                          }}
+                          className={cn(
+                            "px-3 py-2 bg-white border border-slate-200 text-slate-700 rounded-xl text-[11px] font-bold shadow-xs hover:border-indigo-300 hover:bg-slate-50 flex items-center gap-2 transition-all active:scale-95",
+                            isActive && "border-indigo-500 bg-indigo-50/50 ring-2 ring-indigo-50"
+                          )}
+                        >
+                          {p.icon}
+                          {p.label}
+                        </button>
 
-                <AnimatePresence>
-                  {activeDownloadMenu && (
-                    <motion.div 
-                      initial={{ opacity: 0, scale: 0.95, y: -5 }}
-                      animate={{ opacity: 1, scale: 1, y: 0 }}
-                      exit={{ opacity: 0, scale: 0.95, y: -5 }}
-                      className="p-3 bg-slate-50 border border-slate-200 rounded-2xl flex flex-col gap-3"
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Pilih Format ({activeDownloadMenu.type})</span>
-                        <button onClick={() => setActiveDownloadMenu(null)} className="text-slate-400 hover:text-slate-600"><X className="w-3 h-3" /></button>
-                      </div>
-                      <div className="flex gap-1.5 overflow-x-auto pb-1 custom-scrollbar">
-                        {(['.eps', '.jpg', '.png', '.svg'] as const).map((ext) => {
-                          const isRecommended = formatRecommendation === ext;
-                          return (
-                            <button
-                              key={ext}
-                              onClick={() => setExportExtension(ext)}
-                              className={cn(
-                                "whitespace-nowrap px-3 py-1.5 rounded-lg text-[10px] font-bold border transition-all relative",
-                                exportExtension === ext
-                                  ? "bg-indigo-600 border-indigo-600 text-white shadow-sm"
-                                  : cn("bg-white border-slate-200 text-slate-500 hover:bg-slate-50", isRecommended && "border-indigo-200 bg-indigo-50/50")
-                              )}
+                        <AnimatePresence>
+                          {isActive && (
+                            <motion.div 
+                              initial={{ opacity: 0, scale: 0.95, y: -10 }}
+                              animate={{ opacity: 1, scale: 1, y: 0 }}
+                              exit={{ opacity: 0, scale: 0.95, y: -10 }}
+                              className="absolute top-[calc(100%+8px)] left-0 w-56 p-3.5 bg-white border border-slate-200 rounded-2xl shadow-2xl shadow-indigo-200/40 space-y-3.5 z-[100]"
                             >
-                              {ext}
-                              {isRecommended && exportExtension !== ext && (
-                                <span className="absolute -top-1.5 -right-1 px-1 bg-indigo-500 text-[6px] text-white rounded-full uppercase">Best</span>
-                              )}
-                            </button>
-                          );
-                        })}
+                              <div className="flex items-center justify-between px-1">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-1 h-3.5 bg-indigo-600 rounded-full" />
+                                  <span className="text-[9px] font-black text-slate-800 uppercase tracking-widest">{p.label}</span>
+                                </div>
+                                <button onClick={(e) => { e.stopPropagation(); setActiveDownloadMenu(null); }} className="p-1 hover:bg-slate-100 rounded-full text-slate-400 transition-colors">
+                                  <X className="w-3 h-3" />
+                                </button>
+                              </div>
+
+                              <div className="space-y-3">
+                                {p.id === 'freepik' && (
+                                  <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-100 space-y-2">
+                                    <div className="flex items-center justify-between">
+                                      <div className="flex items-center gap-1.5">
+                                        <Sparkles className="w-3 h-3 text-indigo-500" />
+                                        <span className="text-[9px] font-black text-slate-600 uppercase tracking-tight">AI Generated</span>
+                                      </div>
+                                      <button 
+                                        onClick={(e) => { e.stopPropagation(); setIsGenerativeAI(!isGenerativeAI); }}
+                                        className={cn(
+                                          "w-6 h-3 rounded-full relative transition-colors duration-200 shadow-inner",
+                                          isGenerativeAI ? "bg-indigo-600" : "bg-slate-300"
+                                        )}
+                                      >
+                                        <div className={cn(
+                                          "absolute top-0.5 left-0.5 w-2 h-2 bg-white rounded-full transition-transform duration-200 shadow-sm",
+                                          isGenerativeAI ? "translate-x-3" : "translate-x-0"
+                                        )} />
+                                      </button>
+                                    </div>
+                                    
+                                    {isGenerativeAI && (
+                                      <input 
+                                        type="text"
+                                        value={aiModel}
+                                        onClick={(e) => e.stopPropagation()}
+                                        onChange={(e) => setAiModel(e.target.value)}
+                                        className="w-full px-2.5 py-1 bg-white border border-slate-100 rounded-lg text-[9px] focus:ring-1 focus:ring-indigo-500/20 focus:outline-none placeholder:text-slate-300 shadow-sm"
+                                      />
+                                    )}
+                                  </div>
+                                )}
+
+                                <div className="space-y-1.5">
+                                  <span className="text-[8px] font-bold text-slate-400 uppercase tracking-tight px-1">Format:</span>
+                                  <div className="grid grid-cols-4 gap-1.5">
+                                    {(['.eps', '.jpg', '.png', '.svg'] as const).map((ext) => {
+                                      const isRecommended = formatRecommendation === ext;
+                                      return (
+                                        <button
+                                          key={ext}
+                                          onClick={(e) => { e.stopPropagation(); setExportExtension(ext); }}
+                                          className={cn(
+                                            "relative py-1.5 rounded-lg text-[9px] font-black transition-all border flex items-center justify-center",
+                                            exportExtension === ext
+                                              ? "bg-indigo-600 border-indigo-600 text-white shadow-sm"
+                                              : cn(
+                                                  "bg-white border-slate-200 text-slate-500 hover:bg-slate-50",
+                                                  isRecommended && "border-indigo-200 bg-indigo-50"
+                                                )
+                                          )}
+                                        >
+                                          {ext}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (p.id === 'adobe') downloadAdobeStockCSV([selectedImage]);
+                                    else if (p.id === 'shutterstock') downloadShutterstockCSV([selectedImage]);
+                                    else if (p.id === 'freepik') downloadCSV([selectedImage]);
+                                    setActiveDownloadMenu(null);
+                                  }}
+                                  className="w-full py-2 bg-indigo-600 text-white rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center justify-center gap-2 shadow-md shadow-indigo-100 hover:bg-indigo-700 active:scale-95 transition-all"
+                                >
+                                  <Download className="w-3 h-3" /> Download
+                                </button>
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
                       </div>
-                      <button
-                        onClick={() => {
-                          if (activeDownloadMenu.type === 'adobe') downloadAdobeStockCSV([selectedImage]);
-                          else if (activeDownloadMenu.type === 'shutterstock') downloadShutterstockCSV([selectedImage]);
-                          setActiveDownloadMenu(null);
-                        }}
-                        className="w-full py-2 bg-indigo-600 text-white rounded-xl text-[11px] font-bold hover:bg-indigo-700 flex items-center justify-center gap-2 shadow-md shadow-indigo-100"
-                      >
-                        <Download className="w-3 h-3" /> Download CSV
-                      </button>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+                    );
+                  })}
+                </div>
               </div>
             </div>
 
