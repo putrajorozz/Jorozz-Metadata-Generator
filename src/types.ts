@@ -25,6 +25,7 @@ export interface ImageData {
     pngTree?: PngTreeMetadata;
   };
   error?: string;
+  processingTime?: number;
 }
 
 export interface Toast {

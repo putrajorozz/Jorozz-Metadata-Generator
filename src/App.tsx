@@ -126,6 +126,20 @@ export default function App() {
   }>({ isOpen: false, title: '', message: '', onConfirm: () => {} });
   const [newKey, setNewKey] = useState('');
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [startTime, setStartTime] = useState<number | null>(null);
+  const [currentTime, setCurrentTime] = useState<number | null>(null);
+
+  useEffect(() => {
+    let interval: any;
+    if (isGenerating && startTime) {
+      interval = setInterval(() => {
+        setCurrentTime(Date.now());
+      }, 10);
+    } else {
+      clearInterval(interval);
+    }
+    return () => clearInterval(interval);
+  }, [isGenerating, startTime]);
   
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState<{ 
@@ -397,6 +411,8 @@ export default function App() {
     setIsGenerating(true);
     setProgress(0);
     setErrorApiKeys([]);
+    setStartTime(Date.now());
+    setCurrentTime(Date.now());
 
     const pendingImages = images.filter(img => img.status !== 'completed');
     let completedCount = 0;
@@ -406,6 +422,7 @@ export default function App() {
     let modelIndex = lastSuccessModelIndex.current % MODELS.length;
 
     for (const img of pendingImages) {
+      const imageStartTime = Date.now();
       setSelectedId(img.id);
       setImages(prev => prev.map(i => 
         i.id === img.id ? { ...i, status: 'processing' } : i
@@ -509,7 +526,8 @@ export default function App() {
               }
             };
 
-            setImages(prev => prev.map(i => i.id === img.id ? { ...i, status: 'completed', metadata: updatedMetadata } : i));
+            const duration = Date.now() - imageStartTime;
+            setImages(prev => prev.map(i => i.id === img.id ? { ...i, status: 'completed', metadata: updatedMetadata, processingTime: duration } : i));
             success = true;
             
             // SAVE successful pair
@@ -554,6 +572,8 @@ export default function App() {
     }
 
     setIsGenerating(false);
+    setStartTime(null);
+    setCurrentTime(null);
     setActiveApiKey(null);
     if (images.filter(img => img.status === 'completed').length === images.length) {
       addToast("Semua gambar berhasil diproses!", "success");
@@ -576,6 +596,8 @@ export default function App() {
     setSelectedId(id);
     setImages(prev => prev.map(i => i.id === id ? { ...i, status: 'processing' } : i));
     setErrorApiKeys([]);
+    setStartTime(Date.now());
+    setCurrentTime(Date.now());
     
     let currentKeyIndex = lastSuccessKeyIndex.current % activeKeys.length;
     let modelIndex = lastSuccessModelIndex.current % MODELS.length;
@@ -583,6 +605,7 @@ export default function App() {
     
     let modelsTried = 0;
     const totalModels = MODELS.length;
+    const imageStartTime = Date.now();
 
     while (!success && modelsTried < totalModels) {
       const currentModelId = MODELS[modelIndex].id;
@@ -677,7 +700,8 @@ export default function App() {
             }
           };
 
-          setImages(prev => prev.map(i => i.id === id ? { ...i, status: 'completed', metadata: updatedMetadata } : i));
+          const duration = Date.now() - imageStartTime;
+          setImages(prev => prev.map(i => i.id === id ? { ...i, status: 'completed', metadata: updatedMetadata, processingTime: duration } : i));
           success = true;
 
           // SAVE successful pair
@@ -713,6 +737,9 @@ export default function App() {
       ));
       addToast(`Gagal regenerate: ${img.file.name}`, "error");
     }
+    setIsGenerating(false);
+    setStartTime(null);
+    setCurrentTime(null);
     setActiveApiKey(null);
   };
 
@@ -1091,6 +1118,8 @@ export default function App() {
                     setKeywordCount={setKeywordCount}
                     generateMetadata={generateMetadata}
                     isGenerating={isGenerating}
+                    startTime={startTime}
+                    currentTime={currentTime}
                   />
                 </div>
 

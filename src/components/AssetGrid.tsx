@@ -31,6 +31,8 @@ interface AssetGridProps {
   setKeywordCount: (val: number) => void;
   generateMetadata: () => void;
   isGenerating: boolean;
+  startTime: number | null;
+  currentTime: number | null;
 }
 
 export function AssetGrid({
@@ -48,8 +50,28 @@ export function AssetGrid({
   keywordCount,
   setKeywordCount,
   generateMetadata,
-  isGenerating
+  isGenerating,
+  startTime,
+  currentTime
 }: AssetGridProps) {
+  const formatTimer = (start: number | null, current: number | null) => {
+    if (!start || !current) return '00:00.00';
+    const diff = current - start;
+    const mins = Math.floor(diff / 60000);
+    const secs = Math.floor((diff % 60000) / 1000);
+    const ms = Math.floor((diff % 1000) / 10);
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}.${ms.toString().padStart(2, '0')}`;
+  };
+
+  const formatProcessingTime = (ms?: number) => {
+    if (!ms) return '';
+    const totalSecs = Math.floor(ms / 1000);
+    const m = Math.floor(totalSecs / 60);
+    const s = totalSecs % 60;
+    if (m > 0) return `${m}m ${s}s`;
+    return `${s}s`;
+  };
+
   return (
     <div className="space-y-6">
       {/* Persistent Upload Area */}
@@ -136,23 +158,36 @@ export function AssetGrid({
               onClick={generateMetadata}
               disabled={isGenerating || images.length === 0}
               className={cn(
-                "w-full py-4 rounded-2xl text-sm font-black uppercase tracking-widest flex items-center justify-center gap-3 transition-all active:scale-[.98] shadow-lg",
+                "w-full py-4 rounded-2xl text-sm font-black uppercase tracking-widest flex items-center justify-center gap-3 transition-all active:scale-[.98] shadow-lg relative overflow-hidden",
                 isGenerating 
                   ? "bg-slate-100 text-slate-400 cursor-not-allowed shadow-none" 
                   : "bg-indigo-600 text-white shadow-indigo-100 hover:bg-indigo-700 hover:shadow-indigo-200"
               )}
               id="btn-generate-all"
             >
-              {isGenerating ? (
-                <>
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                  PROSES GENERATING...
-                </>
-              ) : (
-                <>
-                  <Sparkles className="w-5 h-5" />
-                  MULAI GENERATE METADATA
-                </>
+              <div className="flex items-center gap-3 relative z-10">
+                {isGenerating ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    <span>GENERATING {formatTimer(startTime, currentTime)}</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-5 h-5" />
+                    <span>MULAI GENERATE METADATA</span>
+                  </>
+                )}
+              </div>
+              {isGenerating && (
+                <motion.div 
+                  initial={{ width: "0%" }}
+                  animate={{ width: "100%" }}
+                  transition={{ 
+                    duration: images.filter(i => i.status !== 'completed').length * 5, 
+                    ease: "linear" 
+                  }}
+                  className="absolute inset-0 bg-indigo-200/20"
+                />
               )}
             </button>
           </div>
@@ -204,10 +239,17 @@ export function AssetGrid({
                 </button>
 
                 {/* Status Overlay */}
-                <div className="absolute top-1 left-1 p-0.5 flex justify-end pointer-events-none">
+                <div className="absolute top-1 left-1 p-0.5 flex flex-col items-start gap-1 pointer-events-none">
                   {img.status === 'completed' && (
-                    <div className="w-3.5 h-3.5 bg-green-500 rounded-full flex items-center justify-center shadow-lg border-2 border-white">
-                      <Check className="w-2 h-2 text-white" />
+                    <div className="flex items-center gap-1">
+                      <div className="w-3.5 h-3.5 bg-green-500 rounded-full flex items-center justify-center shadow-lg border-2 border-white">
+                        <Check className="w-2 h-2 text-white" />
+                      </div>
+                      {img.processingTime && (
+                        <div className="px-1.5 py-0.5 bg-green-500/90 backdrop-blur-sm text-[6px] text-white font-black rounded-full border border-white/20">
+                          {formatProcessingTime(img.processingTime)}
+                        </div>
+                      )}
                     </div>
                   )}
                   {img.status === 'processing' && (
