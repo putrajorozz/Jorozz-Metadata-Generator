@@ -73,18 +73,26 @@ export default function App() {
   // Audio Refs
   const chimeAudio = useRef<HTMLAudioElement | null>(null);
   const successAudio = useRef<HTMLAudioElement | null>(null);
+  const completeAudio = useRef<HTMLAudioElement | null>(null);
+
+  // Persistent state for successful generation pair
+  const lastSuccessKeyIndex = useRef<number>(0);
+  const lastSuccessModelIndex = useRef<number>(0);
 
   useEffect(() => {
     chimeAudio.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
     successAudio.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2013/2013-preview.mp3');
+    completeAudio.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2015/2015-preview.mp3'); // Different sound for batch finish
     
-    // Low volume for chime
+    // Volume settings
     if (chimeAudio.current) chimeAudio.current.volume = 0.4;
     if (successAudio.current) successAudio.current.volume = 0.5;
+    if (completeAudio.current) completeAudio.current.volume = 0.9; // Higher volume for finish
   }, []);
 
   const playChime = () => chimeAudio.current?.play().catch(() => {});
   const playSuccess = () => successAudio.current?.play().catch(() => {});
+  const playComplete = () => completeAudio.current?.play().catch(() => {});
 
   const [apiKeys, setApiKeys] = useState<string[]>(() => {
     const saved = localStorage.getItem('gemini_api_keys');
@@ -389,7 +397,10 @@ export default function App() {
 
     const pendingImages = images.filter(img => img.status !== 'completed');
     let completedCount = 0;
-    let currentKeyIndex = 0;
+
+    // Use current successful indices as starting point
+    let currentKeyIndex = lastSuccessKeyIndex.current % apiKeys.length;
+    let modelIndex = lastSuccessModelIndex.current % MODELS.length;
 
     for (const img of pendingImages) {
       setSelectedId(img.id);
@@ -398,23 +409,23 @@ export default function App() {
       ));
 
       let success = false;
-      let modelIndex = favoriteModelId 
-        ? MODELS.findIndex(m => m.id === favoriteModelId) 
-        : MODELS.findIndex(m => m.id === selectedModel);
-      if (modelIndex === -1) modelIndex = 0;
-      
       let modelsTried = 0;
       const totalModels = MODELS.length;
 
       let lastErrorMessage = "Semua API Key dan Model gagal atau kuota habis";
 
+      // Outer loop: Models
       while (!success && modelsTried < totalModels) {
         const currentModelId = MODELS[modelIndex].id;
-        let retryCount = 0;
-        const maxRetries = activeKeys.length;
+        let keysTried = 0;
+        const totalKeys = apiKeys.length;
 
-        while (!success && retryCount < maxRetries) {
-          const currentKey = activeKeys[currentKeyIndex];
+        // Inner loop: Keys
+        while (!success && keysTried < totalKeys) {
+          // Normalize key index
+          const actualKeyIndex = currentKeyIndex % totalKeys;
+          const currentKey = apiKeys[actualKeyIndex];
+          
           setActiveApiKey(currentKey);
           const ai = new GoogleGenAI({ apiKey: currentKey });
 
@@ -426,8 +437,8 @@ export default function App() {
               reader.onerror = () => reject(new Error(reader.error?.message || "Gagal membaca file gambar"));
               reader.readAsDataURL(img.file);
             });
-            let mimeType = img.file.type || "image/jpeg";
             
+            let mimeType = img.file.type || "image/jpeg";
             const isTransparent = img.file.type === 'image/png' || img.file.type === 'image/svg+xml';
             
             const promptText = `Analyze this image for microstock metadata (Shutterstock, Adobe Stock, PNGTree, etc.). 
@@ -452,15 +463,8 @@ export default function App() {
               model: currentModelId,
               contents: {
                 parts: [
-                  {
-                    inlineData: {
-                      mimeType: mimeType,
-                      data: base64Data,
-                    },
-                  },
-                  {
-                    text: promptText,
-                  },
+                  { inlineData: { mimeType: mimeType, data: base64Data } },
+                  { text: promptText },
                 ],
               },
               config: {
@@ -470,27 +474,11 @@ export default function App() {
                   properties: {
                     title: { type: Type.STRING },
                     description: { type: Type.STRING },
-                    keywords: { 
-                      type: Type.ARRAY,
-                      items: { type: Type.STRING }
-                    },
-                    categories: {
-                      type: Type.ARRAY,
-                      items: { type: Type.STRING },
-                      description: "Exactly 2 categories from the provided list"
-                    },
-                    adobeCategory: {
-                      type: Type.STRING,
-                      description: "Exactly 1 category from the Adobe Stock list"
-                    },
-                    pngTreeMainKeywords: {
-                      type: Type.ARRAY,
-                      items: { type: Type.STRING }
-                    },
-                    pngTreeSecondaryKeywords: {
-                      type: Type.ARRAY,
-                      items: { type: Type.STRING }
-                    },
+                    keywords: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    categories: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    adobeCategory: { type: Type.STRING },
+                    pngTreeMainKeywords: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    pngTreeSecondaryKeywords: { type: Type.ARRAY, items: { type: Type.STRING } },
                     pngTreeMainCopy: { type: Type.STRING }
                   },
                   required: ["title", "description", "keywords", "categories", "adobeCategory", "pngTreeMainKeywords", "pngTreeSecondaryKeywords", "pngTreeMainCopy"]
@@ -518,43 +506,35 @@ export default function App() {
               }
             };
 
-            const updatedImage = { 
-              ...img, 
-              status: 'completed' as const, 
-              metadata: updatedMetadata 
-            };
-
-            setImages(prev => prev.map(i => i.id === img.id ? updatedImage : i));
+            setImages(prev => prev.map(i => i.id === img.id ? { ...i, status: 'completed', metadata: updatedMetadata } : i));
             success = true;
-            setActiveApiKey(null);
+            
+            // SAVE successful pair
+            lastSuccessKeyIndex.current = actualKeyIndex;
+            lastSuccessModelIndex.current = modelIndex;
+            
             addToast(`Berhasil generate: ${img.file.name}`, "success");
-            playChime(); // Play sound for each completion
-            
-            // Cycle to next key for next image even on success
-            currentKeyIndex = (currentKeyIndex + 1) % activeKeys.length;
+            playChime();
           } catch (error) {
-            console.error(`Error with key ${currentKeyIndex} on model ${currentModelId}:`, error);
+            console.error(`Error with key ${actualKeyIndex} on model ${currentModelId}:`, error);
             lastErrorMessage = getErrorMessage(error);
-            const failedKey = activeKeys[currentKeyIndex];
-            setErrorApiKeys(prev => [...new Set([...prev, failedKey])]);
+            setErrorApiKeys(prev => [...new Set([...prev, currentKey])]);
             
-            if (lastErrorMessage.includes("API_KEY_INVALID") || lastErrorMessage.includes("403") || lastErrorMessage.includes("401")) {
-              addToast(`API Key tidak valid: ${failedKey.substring(0, 8)}...`, "error");
-            } else {
-              addToast(`Memeriksa model/key lain...`, "info");
-            }
-
-            currentKeyIndex = (currentKeyIndex + 1) % activeKeys.length;
-            retryCount++;
+            // Try next key for the SAME model
+            currentKeyIndex++;
+            keysTried++;
           }
         }
 
         if (!success) {
-          // Rotate to next model
+          // All keys failed for this model, rotate to next model
           modelIndex = (modelIndex + 1) % MODELS.length;
+          // IMPORTANT: reset key index to 0 so we try all keys for the NEW model
+          currentKeyIndex = 0; 
           modelsTried++;
+          
           if (modelsTried < totalModels) {
-            addToast(`Model ${currentModelId} limit, mencoba model ${MODELS[modelIndex].name}...`, "info");
+            addToast(`Pencarian resource... mencoba model ${MODELS[modelIndex].name}`, "info");
           }
         }
       }
@@ -572,9 +552,9 @@ export default function App() {
 
     setIsGenerating(false);
     setActiveApiKey(null);
-    if (images.every(img => img.status === 'completed')) {
+    if (images.filter(img => img.status === 'completed').length === images.length) {
       addToast("Semua gambar berhasil diproses!", "success");
-      playSuccess(); // Play batch completion sound
+      playComplete(); // Play louder completion sound
     }
   };
 
@@ -594,24 +574,22 @@ export default function App() {
     setImages(prev => prev.map(i => i.id === id ? { ...i, status: 'processing' } : i));
     setErrorApiKeys([]);
     
-    let currentKeyIndex = 0;
+    let currentKeyIndex = lastSuccessKeyIndex.current % activeKeys.length;
+    let modelIndex = lastSuccessModelIndex.current % MODELS.length;
     let success = false;
-    
-    let modelIndex = favoriteModelId 
-      ? MODELS.findIndex(m => m.id === favoriteModelId) 
-      : MODELS.findIndex(m => m.id === selectedModel);
-    if (modelIndex === -1) modelIndex = 0;
     
     let modelsTried = 0;
     const totalModels = MODELS.length;
 
     while (!success && modelsTried < totalModels) {
       const currentModelId = MODELS[modelIndex].id;
-      let retryCount = 0;
-      const maxRetries = activeKeys.length;
+      let keysTried = 0;
+      const totalKeys = apiKeys.length;
 
-      while (!success && retryCount < maxRetries) {
-        const currentKey = activeKeys[currentKeyIndex];
+      while (!success && keysTried < totalKeys) {
+        const actualKeyIndex = currentKeyIndex % totalKeys;
+        const currentKey = apiKeys[actualKeyIndex];
+        
         setActiveApiKey(currentKey);
         const ai = new GoogleGenAI({ apiKey: currentKey });
 
@@ -623,8 +601,8 @@ export default function App() {
             reader.onerror = () => reject(new Error(reader.error?.message || "Gagal membaca file gambar"));
             reader.readAsDataURL(img.file);
           });
-          let mimeType = img.file.type || "image/jpeg";
           
+          let mimeType = img.file.type || "image/jpeg";
           const isTransparent = img.file.type === 'image/png' || img.file.type === 'image/svg+xml';
           
           const promptText = `Analyze this image for microstock metadata (Shutterstock, Adobe Stock, PNGTree, etc.). 
@@ -660,27 +638,11 @@ export default function App() {
                 properties: {
                   title: { type: Type.STRING },
                   description: { type: Type.STRING },
-                  keywords: { 
-                    type: Type.ARRAY,
-                    items: { type: Type.STRING }
-                  },
-                  categories: {
-                    type: Type.ARRAY,
-                    items: { type: Type.STRING },
-                    description: "Exactly 2 categories from the provided list"
-                  },
-                  adobeCategory: {
-                    type: Type.STRING,
-                    description: "Exactly 1 category from the Adobe Stock list"
-                  },
-                  pngTreeMainKeywords: {
-                    type: Type.ARRAY,
-                    items: { type: Type.STRING }
-                  },
-                  pngTreeSecondaryKeywords: {
-                    type: Type.ARRAY,
-                    items: { type: Type.STRING }
-                  },
+                  keywords: { type: Type.ARRAY, items: { type: Type.STRING } },
+                  categories: { type: Type.ARRAY, items: { type: Type.STRING } },
+                  adobeCategory: { type: Type.STRING },
+                  pngTreeMainKeywords: { type: Type.ARRAY, items: { type: Type.STRING } },
+                  pngTreeSecondaryKeywords: { type: Type.ARRAY, items: { type: Type.STRING } },
                   pngTreeMainCopy: { type: Type.STRING }
                 },
                 required: ["title", "description", "keywords", "categories", "adobeCategory", "pngTreeMainKeywords", "pngTreeSecondaryKeywords", "pngTreeMainCopy"]
@@ -712,40 +674,32 @@ export default function App() {
             }
           };
 
-          const updatedImage = { 
-            ...img, 
-            status: 'completed' as const, 
-            metadata: updatedMetadata 
-          };
-
-          setImages(prev => prev.map(i => i.id === id ? updatedImage : i));
+          setImages(prev => prev.map(i => i.id === id ? { ...i, status: 'completed', metadata: updatedMetadata } : i));
           success = true;
-          setActiveApiKey(null);
+
+          // SAVE successful pair
+          lastSuccessKeyIndex.current = actualKeyIndex;
+          lastSuccessModelIndex.current = modelIndex;
+
           addToast(`Berhasil regenerate: ${img.file.name}`, "success");
-          playChime(); // Play sound for single regeneration
+          playChime();
         } catch (error) {
-          console.error(`Error with key ${currentKeyIndex} on model ${currentModelId}:`, error);
-          const failedKey = activeKeys[currentKeyIndex];
+          console.error(`Error with key ${actualKeyIndex} on model ${currentModelId}:`, error);
+          const failedKey = activeKeys[actualKeyIndex];
           setErrorApiKeys(prev => [...new Set([...prev, failedKey])]);
           
-          const errorMessage = getErrorMessage(error);
-          if (errorMessage.includes("API_KEY_INVALID") || errorMessage.includes("403") || errorMessage.includes("401")) {
-            addToast(`API Key tidak valid: ${failedKey.substring(0, 8)}...`, "error");
-          } else {
-            addToast(`API Key error, mencoba key berikutnya...`, "info");
-          }
-          
-          currentKeyIndex = (currentKeyIndex + 1) % activeKeys.length;
-          retryCount++;
+          currentKeyIndex++;
+          keysTried++;
         }
       }
 
       if (!success) {
         // Rotate to next model
         modelIndex = (modelIndex + 1) % MODELS.length;
+        currentKeyIndex = 0;
         modelsTried++;
         if (modelsTried < totalModels) {
-          addToast(`Model ${currentModelId} limit, mencoba model ${MODELS[modelIndex].name}...`, "info");
+          addToast(`Pencarian resource... mencoba model ${MODELS[modelIndex].name}`, "info");
         }
       }
     }
