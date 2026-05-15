@@ -771,11 +771,12 @@ export default function App() {
     const rows = imagesToExport.map(img => {
       const row = [
         img.file.name,
-        `"${img.metadata!.title.replace(/"/g, '""')}"`,
-        `"${img.metadata!.keywords.join(', ').replace(/"/g, '""')}"`
+        img.metadata!.title.replace(/"/g, '""'),
+        img.metadata!.keywords.join(',').replace(/"/g, '""')
       ];
       
       if (isGenerativeAI) {
+        // User wants exactly: filename;title;keywords;"";"Model Name"
         row.push('""', `"${aiModel.replace(/"/g, '""')}"`);
       }
       
