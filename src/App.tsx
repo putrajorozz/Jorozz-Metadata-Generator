@@ -970,19 +970,53 @@ export default function App() {
   };
 
   const handleAddKey = () => {
-    if (!newKey.trim()) return;
+    const rawInput = newKey.trim();
+    if (!rawInput) return;
     
-    // Basic validation: Gemini API keys usually start with AIza
-    if (!newKey.trim().startsWith("AIza")) {
-      addToast("Format API Key tidak valid. Pastikan Anda memasukkan API Key Gemini yang benar (dimulai dengan 'AIza').", "error");
-      return;
+    // Split by newlines, commas, or whitespace
+    const potentialKeys = rawInput.split(/[\n,\s]+/).map(k => k.trim()).filter(k => k !== '');
+    
+    if (potentialKeys.length === 0) return;
+
+    const validKeys: string[] = [];
+    const invalidKeys: string[] = [];
+    const duplicateKeys: string[] = [];
+
+    potentialKeys.forEach(key => {
+      // Basic validation: Gemini API keys usually start with AIza
+      if (!key.startsWith("AIza")) {
+        invalidKeys.push(key);
+      } else if (apiKeys.includes(key)) {
+        duplicateKeys.push(key);
+      } else {
+        validKeys.push(key);
+      }
+    });
+
+    if (validKeys.length > 0) {
+      const updated = [...apiKeys, ...validKeys];
+      setApiKeys(updated);
+      localStorage.setItem('gemini_api_keys', JSON.stringify(updated));
+      setNewKey('');
+      
+      if (validKeys.length === 1 && potentialKeys.length === 1) {
+        addToast("API Key ditambahkan", "success");
+      } else {
+        addToast(`${validKeys.length} API Key berhasil ditambahkan`, "success");
+      }
     }
 
-    const updated = [...apiKeys, newKey.trim()];
-    setApiKeys(updated);
-    localStorage.setItem('gemini_api_keys', JSON.stringify(updated));
-    setNewKey('');
-    addToast("API Key ditambahkan", "success");
+    if (invalidKeys.length > 0) {
+      if (potentialKeys.length === 1) {
+        addToast("Format API Key tidak valid. Harus dimulai dengan 'AIza'.", "error");
+      } else {
+        addToast(`${invalidKeys.length} key dilewati karena format tidak valid`, "error");
+      }
+    }
+
+    if (duplicateKeys.length > 0 && validKeys.length === 0) {
+      addToast("Key sudah ada dalam daftar", "info");
+    }
   };
 
   const removeKey = (index: number) => {
@@ -1219,20 +1253,29 @@ export default function App() {
               </div>
               
               <div className="p-6 space-y-4">
-                <div className="flex gap-2">
-                  <input 
-                    type="password"
-                    placeholder="Masukkan Gemini API Key..."
-                    value={newKey}
-                    onChange={(e) => setNewKey(e.target.value)}
-                    className="flex-1 px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
-                  />
-                  <button 
-                    onClick={handleAddKey}
-                    className="p-2 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors"
-                  >
-                    <Plus className="w-5 h-5" />
-                  </button>
+                <div className="space-y-2">
+                  <div className="flex gap-2">
+                    <textarea 
+                      placeholder="Masukkan satu atau banyak Gemini API Key (pisahkan dengan baris baru)..."
+                      value={newKey}
+                      onChange={(e) => setNewKey(e.target.value)}
+                      rows={newKey.split('\n').length > 3 ? 5 : 3}
+                      className="flex-1 px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/20 resize-none custom-scrollbar"
+                    />
+                    <div className="flex flex-col justify-end">
+                      <button 
+                        onClick={handleAddKey}
+                        className="p-3 bg-indigo-600 text-white rounded-2xl hover:bg-indigo-700 transition-all hover:shadow-lg active:scale-95"
+                        title="Tambah Key"
+                      >
+                        <Plus className="w-5 h-5" />
+                      </button>
+                    </div>
+                  </div>
+                  <p className="text-[10px] text-slate-400 px-1">
+                    <Info className="w-3 h-3 inline mr-1" />
+                    Bisa memasukkan banyak key sekaligus dipisah baris baru.
+                  </p>
                 </div>
 
                 <div className="space-y-2 max-h-60 overflow-y-auto custom-scrollbar pr-2">
