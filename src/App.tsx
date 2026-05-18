@@ -465,12 +465,21 @@ export default function App() {
             let mimeType = img.file.type || "image/jpeg";
             const isTransparent = img.file.type === 'image/png' || img.file.type === 'image/svg+xml';
             
-            const promptText = `Analyze this image for microstock metadata (Shutterstock, Adobe Stock, PNGTree, etc.). 
+            const promptText = `Analyze this image for ALL microstock metadata platforms (Shutterstock, Adobe Stock, PNGTree, etc.). 
+                    IMPORTANT: The metadata must be human-like and NOT robotic. This applies to ALL agencies.
                     ${isTransparent ? "IMPORTANT: This image has a TRANSPARENT background (no background). DO NOT mention 'white background', 'isolated on white', or any solid background color in the title, description, or keywords. Use 'transparent background' or 'isolated' if needed. " : ""}
+                    
                     Generate the following in JSON format:
-                    - title: A concise, human-like title. Start with the main subject/object first, followed by style and context. Avoid filler words at the start (like "A", "An", "The") and "robotic" phrases like "featuring", "of an", "against a". (approximately ${titleLength} characters long).
-                    - description: A natural, SEO-friendly description (10-20 words).
-                    - keywords: Exactly ${keywordCount} specific, human-like keywords. Prioritize identifying specific objects, artistic styles, and moods. Avoid generic robotic fillers. No duplicates.
+                    - title: MANDATORY HUMAN STYLE. A concise, natural title. Start with the main SUBJECT/OBJECT first. 
+                      * RULES: 
+                        1. NO filler words at the start (DO NOT start with "A", "An", "The").
+                        2. NO robotic phrases like "featuring", "of an", "against a", "depicting", "isolated on".
+                        3. Flow: [Object/Main Subject] + [Style/Context].
+                        4. Length: approximately ${titleLength} chars.
+                    - description: A natural, human-written description (10-20 words). Avoid "This is a photo of...".
+                    - keywords: Exactly ${keywordCount} SPECIFIC human-like keywords. 
+                      * Priority: Specific visual elements, artistic style (vector, 3d, oil painting, minimalist), and mood. 
+                      * NO generic robotic fillers. NO duplicates.
                     - categories: Select exactly 2 most relevant categories from this list: [Abstract, Animals/Wildlife, Arts, Backgrounds/Textures, Beauty/Fashion, Buildings/Landmarks, Business/Finance, Celebrities, Education, Food and drink, Healthcare/Medical, Holidays, Industrial, Interiors, Miscellaneous, Nature, Objects, Parks/Outdoor, People, Religion, Science, Signs/Symbols, Sports/Recreation, Technology, Transportation, Vintage].
                     - adobeCategory: Select exactly 1 most relevant category from this list: [Animals, Buildings And Architecture, Business, Drinks, The Environment, States of Mind, Food, Graphic Resources, Hobbies and Leisure, Industry, Landscapes, Lifestyle, People, Plants and Flowers, Culture and Religion, Science, Social Issues, Sports, Technology, Transport, Travel].
                     
@@ -583,15 +592,22 @@ export default function App() {
     
     // Check if we just finished the batch
     addToast("Semua gambar berhasil diproses!", "success");
-    playComplete(); // Play louder completion sound
+    playComplete(); 
     
-    // Auto scroll to download hub with a slight delay for better UX
+    // Auto scroll with robust calculation and 800ms delay to ensure layout is settled
     setTimeout(() => {
       if (downloadHubRef.current) {
-        const topOffset = downloadHubRef.current.getBoundingClientRect().top + window.scrollY - 100;
-        window.scrollTo({ top: topOffset, behavior: 'smooth' });
+        const elementRect = downloadHubRef.current.getBoundingClientRect();
+        const absoluteElementTop = elementRect.top + window.pageYOffset;
+        // Offset for the fixed header (roughly 80-100px)
+        const scrollToY = absoluteElementTop - 120;
+        
+        window.scrollTo({
+          top: scrollToY,
+          behavior: 'smooth'
+        });
       }
-    }, 600);
+    }, 800);
   };
 
   const regenerateSingleMetadata = async (id: string) => {
@@ -646,12 +662,21 @@ export default function App() {
           let mimeType = img.file.type || "image/jpeg";
           const isTransparent = img.file.type === 'image/png' || img.file.type === 'image/svg+xml';
           
-          const promptText = `Analyze this image for microstock metadata (Shutterstock, Adobe Stock, PNGTree, etc.). 
+          const promptText = `Analyze this image for ALL microstock metadata platforms (Shutterstock, Adobe Stock, PNGTree, etc.). 
+                  IMPORTANT: The metadata must be human-like and NOT robotic. This applies to ALL agencies.
                   ${isTransparent ? "IMPORTANT: This image has a TRANSPARENT background (no background). DO NOT mention 'white background', 'isolated on white', or any solid background color in the title, description, or keywords. Use 'transparent background' or 'isolated' if needed. " : ""}
+                  
                   Generate the following in JSON format:
-                  - title: A concise, human-like title. Start with the main subject/object first, followed by style and context. Avoid filler words at the start (like "A", "An", "The") and "robotic" phrases like "featuring", "of an", "against a". (approximately ${titleLength} characters long).
-                  - description: A natural, SEO-friendly description (10-20 words).
-                  - keywords: Exactly ${keywordCount} specific, human-like keywords. Prioritize identifying specific objects, artistic styles, and moods. Avoid generic robotic fillers. No duplicates.
+                  - title: MANDATORY HUMAN STYLE. A concise, natural title. Start with the main SUBJECT/OBJECT first. 
+                    * RULES: 
+                      1. NO filler words at the start (DO NOT start with "A", "An", "The").
+                      2. NO robotic phrases like "featuring", "of an", "against a", "depicting", "isolated on".
+                      3. Flow: [Object/Main Subject] + [Style/Context].
+                      4. Length: approximately ${titleLength} chars.
+                  - description: A natural, human-written description (10-20 words). Avoid "This is a photo of...".
+                  - keywords: Exactly ${keywordCount} SPECIFIC human-like keywords. 
+                    * Priority: Specific visual elements, artistic style (vector, 3d, oil painting, minimalist), and mood. 
+                    * NO generic robotic fillers. NO duplicates.
                   - categories: Select exactly 2 most relevant categories from this list: [Abstract, Animals/Wildlife, Arts, Backgrounds/Textures, Beauty/Fashion, Buildings/Landmarks, Business/Finance, Celebrities, Education, Food and drink, Healthcare/Medical, Holidays, Industrial, Interiors, Miscellaneous, Nature, Objects, Parks/Outdoor, People, Religion, Science, Signs/Symbols, Sports/Recreation, Technology, Transportation, Vintage].
                   - adobeCategory: Select exactly 1 most relevant category from this list: [Animals, Buildings And Architecture, Business, Drinks, The Environment, States of Mind, Food, Graphic Resources, Hobbies and Leisure, Industry, Landscapes, Lifestyle, People, Plants and Flowers, Culture and Religion, Science, Social Issues, Sports, Technology, Transport, Travel].
                   
