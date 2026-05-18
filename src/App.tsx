@@ -580,15 +580,18 @@ export default function App() {
     setStartTime(null);
     setCurrentTime(null);
     setActiveApiKey(null);
-    if (images.filter(img => img.status === 'completed').length === images.length) {
-      addToast("Semua gambar berhasil diproses!", "success");
-      playComplete(); // Play louder completion sound
-      
-      // Auto scroll to download hub
-      setTimeout(() => {
-        downloadHubRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }, 500);
-    }
+    
+    // Check if we just finished the batch
+    addToast("Semua gambar berhasil diproses!", "success");
+    playComplete(); // Play louder completion sound
+    
+    // Auto scroll to download hub with a slight delay for better UX
+    setTimeout(() => {
+      if (downloadHubRef.current) {
+        const topOffset = downloadHubRef.current.getBoundingClientRect().top + window.scrollY - 100;
+        window.scrollTo({ top: topOffset, behavior: 'smooth' });
+      }
+    }, 600);
   };
 
   const regenerateSingleMetadata = async (id: string) => {
