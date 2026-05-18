@@ -33,6 +33,7 @@ interface AssetGridProps {
   isGenerating: boolean;
   startTime: number | null;
   currentTime: number | null;
+  lastGenerationDuration: number | null;
 }
 
 export function AssetGrid({
@@ -52,7 +53,8 @@ export function AssetGrid({
   generateMetadata,
   isGenerating,
   startTime,
-  currentTime
+  currentTime,
+  lastGenerationDuration
 }: AssetGridProps) {
   const formatTimer = (start: number | null, current: number | null) => {
     if (!start || !current) return '00:00.00';
@@ -190,6 +192,17 @@ export function AssetGrid({
                 />
               )}
             </button>
+            
+            {!isGenerating && lastGenerationDuration && images.some(img => img.status === 'completed') && (
+              <motion.div 
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="mt-3 flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest text-green-600 bg-green-50 py-2 px-4 rounded-xl border border-green-100 shadow-sm"
+              >
+                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+                PROSES SELESAI DALAM {formatProcessingTime(lastGenerationDuration)}
+              </motion.div>
+            )}
           </div>
         </div>
       )}
@@ -242,8 +255,8 @@ export function AssetGrid({
                 <div className="absolute top-1 left-1 p-0.5 flex flex-col items-start gap-1 pointer-events-none">
                   {img.status === 'completed' && (
                     <div className="flex items-center gap-1">
-                      <div className="w-3.5 h-3.5 bg-green-500 rounded-full flex items-center justify-center shadow-lg border-2 border-white">
-                        <Check className="w-2 h-2 text-white" />
+                      <div className="w-5 h-5 bg-green-500 rounded-full flex items-center justify-center shadow-lg border-2 border-white">
+                        <Check className="w-3 h-3 text-white" />
                       </div>
                       {img.processingTime && (
                         <div className="px-1.5 py-0.5 bg-green-500/90 backdrop-blur-sm text-[6px] text-white font-black rounded-full border border-white/20">
@@ -253,13 +266,13 @@ export function AssetGrid({
                     </div>
                   )}
                   {img.status === 'processing' && (
-                    <div className="w-3.5 h-3.5 bg-indigo-500 rounded-full flex items-center justify-center shadow-lg border-2 border-white animate-pulse">
-                      <Loader2 className="w-2 h-2 text-white animate-spin" />
+                    <div className="w-5 h-5 bg-indigo-500 rounded-full flex items-center justify-center shadow-lg border-2 border-white animate-pulse">
+                      <Loader2 className="w-3 h-3 text-white animate-spin" />
                     </div>
                   )}
                   {img.status === 'error' && (
-                    <div className="w-3.5 h-3.5 bg-red-500 rounded-full flex items-center justify-center shadow-lg border-2 border-white">
-                      <AlertCircle className="w-2 h-2 text-white" />
+                    <div className="w-5 h-5 bg-red-500 rounded-full flex items-center justify-center shadow-lg border-2 border-white">
+                      <AlertCircle className="w-3 h-3 text-white" />
                     </div>
                   )}
                 </div>

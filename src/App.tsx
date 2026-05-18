@@ -77,6 +77,7 @@ export default function App() {
   const chimeAudio = useRef<HTMLAudioElement | null>(null);
   const successAudio = useRef<HTMLAudioElement | null>(null);
   const completeAudio = useRef<HTMLAudioElement | null>(null);
+  const downloadHubRef = useRef<HTMLDivElement>(null);
 
   // Persistent state for successful generation pair
   const lastSuccessKeyIndex = useRef<number>(0);
@@ -128,6 +129,7 @@ export default function App() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [startTime, setStartTime] = useState<number | null>(null);
   const [currentTime, setCurrentTime] = useState<number | null>(null);
+  const [lastGenerationDuration, setLastGenerationDuration] = useState<number | null>(null);
 
   useEffect(() => {
     let interval: any;
@@ -411,8 +413,10 @@ export default function App() {
     setIsGenerating(true);
     setProgress(0);
     setErrorApiKeys([]);
-    setStartTime(Date.now());
-    setCurrentTime(Date.now());
+    const batchStartTime = Date.now();
+    setStartTime(batchStartTime);
+    setCurrentTime(batchStartTime);
+    setLastGenerationDuration(null);
 
     const pendingImages = images.filter(img => img.status !== 'completed');
     let completedCount = 0;
@@ -572,12 +576,18 @@ export default function App() {
     }
 
     setIsGenerating(false);
+    setLastGenerationDuration(Date.now() - batchStartTime);
     setStartTime(null);
     setCurrentTime(null);
     setActiveApiKey(null);
     if (images.filter(img => img.status === 'completed').length === images.length) {
       addToast("Semua gambar berhasil diproses!", "success");
       playComplete(); // Play louder completion sound
+      
+      // Auto scroll to download hub
+      setTimeout(() => {
+        downloadHubRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 500);
     }
   };
 
@@ -596,8 +606,10 @@ export default function App() {
     setSelectedId(id);
     setImages(prev => prev.map(i => i.id === id ? { ...i, status: 'processing' } : i));
     setErrorApiKeys([]);
-    setStartTime(Date.now());
-    setCurrentTime(Date.now());
+    const batchStartTime = Date.now();
+    setStartTime(batchStartTime);
+    setCurrentTime(batchStartTime);
+    setLastGenerationDuration(null);
     
     let currentKeyIndex = lastSuccessKeyIndex.current % activeKeys.length;
     let modelIndex = lastSuccessModelIndex.current % MODELS.length;
@@ -738,6 +750,7 @@ export default function App() {
       addToast(`Gagal regenerate: ${img.file.name}`, "error");
     }
     setIsGenerating(false);
+    setLastGenerationDuration(Date.now() - batchStartTime);
     setStartTime(null);
     setCurrentTime(null);
     setActiveApiKey(null);
@@ -1154,11 +1167,12 @@ export default function App() {
                     isGenerating={isGenerating}
                     startTime={startTime}
                     currentTime={currentTime}
+                    lastGenerationDuration={lastGenerationDuration}
                   />
                 </div>
 
                 <div className="space-y-6">
-                  <div className={cn(
+                  <div ref={downloadHubRef} className={cn(
                     "transition-all duration-300",
                     activePlatform ? "z-[999] relative" : "z-20 relative"
                   )}>
@@ -1536,13 +1550,13 @@ export default function App() {
       )}
 
       {/* Toasts */}
-      <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[110] flex flex-col gap-2 items-center pointer-events-none">
+      <div className="fixed top-24 right-6 z-[110] flex flex-col gap-2 items-end pointer-events-none">
         <AnimatePresence>
           {toasts.map((toast) => (
             <motion.div
               key={toast.id}
-              initial={{ opacity: 0, y: 20, scale: 0.9 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
+              initial={{ opacity: 0, x: 20, scale: 0.9 }}
+              animate={{ opacity: 1, x: 0, scale: 1 }}
               exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.2 } }}
               className={cn(
                 "px-4 py-2.5 rounded-2xl shadow-xl border backdrop-blur-md flex items-center gap-3 pointer-events-auto",
