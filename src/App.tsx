@@ -468,9 +468,9 @@ export default function App() {
             const promptText = `Analyze this image for microstock metadata (Shutterstock, Adobe Stock, PNGTree, etc.). 
                     ${isTransparent ? "IMPORTANT: This image has a TRANSPARENT background (no background). DO NOT mention 'white background', 'isolated on white', or any solid background color in the title, description, or keywords. Use 'transparent background' or 'isolated' if needed. " : ""}
                     Generate the following in JSON format:
-                    - title: A catchy, descriptive title focusing on the main subject (approximately ${titleLength} characters long).
-                    - description: A detailed, SEO-friendly description including context, mood, and key elements (10-20 words).
-                    - keywords: Exactly ${keywordCount} relevant keywords as an array of strings. Include specific details, broad categories, and conceptual terms. No duplicates.
+                    - title: A concise, human-like title. Start with the main subject/object first, followed by style and context. Avoid filler words at the start (like "A", "An", "The") and "robotic" phrases like "featuring", "of an", "against a". (approximately ${titleLength} characters long).
+                    - description: A natural, SEO-friendly description (10-20 words).
+                    - keywords: Exactly ${keywordCount} specific, human-like keywords. Prioritize identifying specific objects, artistic styles, and moods. Avoid generic robotic fillers. No duplicates.
                     - categories: Select exactly 2 most relevant categories from this list: [Abstract, Animals/Wildlife, Arts, Backgrounds/Textures, Beauty/Fashion, Buildings/Landmarks, Business/Finance, Celebrities, Education, Food and drink, Healthcare/Medical, Holidays, Industrial, Interiors, Miscellaneous, Nature, Objects, Parks/Outdoor, People, Religion, Science, Signs/Symbols, Sports/Recreation, Technology, Transportation, Vintage].
                     - adobeCategory: Select exactly 1 most relevant category from this list: [Animals, Buildings And Architecture, Business, Drinks, The Environment, States of Mind, Food, Graphic Resources, Hobbies and Leisure, Industry, Landscapes, Lifestyle, People, Plants and Flowers, Culture and Religion, Science, Social Issues, Sports, Technology, Transport, Travel].
                     
@@ -646,9 +646,9 @@ export default function App() {
           const promptText = `Analyze this image for microstock metadata (Shutterstock, Adobe Stock, PNGTree, etc.). 
                   ${isTransparent ? "IMPORTANT: This image has a TRANSPARENT background (no background). DO NOT mention 'white background', 'isolated on white', or any solid background color in the title, description, or keywords. Use 'transparent background' or 'isolated' if needed. " : ""}
                   Generate the following in JSON format:
-                  - title: A catchy, descriptive title focusing on the main subject (approximately ${titleLength} characters long).
-                  - description: A detailed, SEO-friendly description including context, mood, and key elements (10-20 words).
-                  - keywords: Exactly ${keywordCount} relevant keywords as an array of strings. Include specific details, broad categories, and conceptual terms. No duplicates.
+                  - title: A concise, human-like title. Start with the main subject/object first, followed by style and context. Avoid filler words at the start (like "A", "An", "The") and "robotic" phrases like "featuring", "of an", "against a". (approximately ${titleLength} characters long).
+                  - description: A natural, SEO-friendly description (10-20 words).
+                  - keywords: Exactly ${keywordCount} specific, human-like keywords. Prioritize identifying specific objects, artistic styles, and moods. Avoid generic robotic fillers. No duplicates.
                   - categories: Select exactly 2 most relevant categories from this list: [Abstract, Animals/Wildlife, Arts, Backgrounds/Textures, Beauty/Fashion, Buildings/Landmarks, Business/Finance, Celebrities, Education, Food and drink, Healthcare/Medical, Holidays, Industrial, Interiors, Miscellaneous, Nature, Objects, Parks/Outdoor, People, Religion, Science, Signs/Symbols, Sports/Recreation, Technology, Transportation, Vintage].
                   - adobeCategory: Select exactly 1 most relevant category from this list: [Animals, Buildings And Architecture, Business, Drinks, The Environment, States of Mind, Food, Graphic Resources, Hobbies and Leisure, Industry, Landscapes, Lifestyle, People, Plants and Flowers, Culture and Religion, Science, Social Issues, Sports, Technology, Transport, Travel].
                   
