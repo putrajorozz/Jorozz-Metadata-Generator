@@ -27,6 +27,7 @@ import {
   Search,
   Image as ImageIcon,
   FileText,
+  Layers,
   MoreVertical
 } from 'lucide-react';
 import { GoogleGenAI, Type } from "@google/genai";
@@ -39,6 +40,7 @@ import { TopHeader } from './components/TopHeader';
 import { AssetGrid } from './components/AssetGrid';
 import { MetadataPanel } from './components/MetadataPanel';
 import { BatchDownloadHub } from './components/BatchDownloadHub';
+import { EpsMetadataInjector } from './components/EpsMetadataInjector';
 
 // Import constants and types
 import { MODELS, CHANGELOG_DATA } from './constants';
@@ -130,6 +132,7 @@ export default function App() {
   const [startTime, setStartTime] = useState<number | null>(null);
   const [currentTime, setCurrentTime] = useState<number | null>(null);
   const [lastGenerationDuration, setLastGenerationDuration] = useState<number | null>(null);
+  const [currentPage, setCurrentPage] = useState<'generator' | 'injector'>('generator');
 
   useEffect(() => {
     let interval: any;
@@ -1182,7 +1185,40 @@ export default function App() {
           </AnimatePresence>
 
           <div className="flex-1 overflow-y-auto p-4 sm:p-8 custom-scrollbar pb-24 md:pb-8">
-            <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-6 lg:gap-8 max-w-[1600px] mx-auto">
+            {/* Page Tabs */}
+            <div className="flex justify-center mb-6 max-w-sm mx-auto">
+              <div className="bg-slate-100 p-1.5 rounded-2xl flex items-center gap-1.5 border border-slate-200/50 w-full shadow-inner">
+                <button 
+                  onClick={() => setCurrentPage('generator')}
+                  className={cn(
+                    "flex-1 py-2 px-3 rounded-xl text-[11px] sm:text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 transition-all duration-300",
+                    currentPage === 'generator' 
+                      ? "bg-white text-indigo-600 shadow-md shadow-indigo-100/30 font-black border border-slate-200/20" 
+                      : "text-slate-500 hover:text-slate-700 hover:bg-slate-50/50"
+                  )}
+                  id="tab-generator"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  AI Generator
+                </button>
+                <button 
+                  onClick={() => setCurrentPage('injector')}
+                  className={cn(
+                    "flex-1 py-2 px-3 rounded-xl text-[11px] sm:text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 transition-all duration-300",
+                    currentPage === 'injector' 
+                      ? "bg-white text-indigo-600 shadow-md shadow-indigo-100/30 font-black border border-slate-200/20" 
+                      : "text-slate-500 hover:text-slate-700 hover:bg-slate-50/50"
+                  )}
+                  id="tab-injector"
+                >
+                  <Layers className="w-3.5 h-3.5" />
+                  Suntik EPS
+                </button>
+              </div>
+            </div>
+
+            {currentPage === 'generator' ? (
+              <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-6 lg:gap-8 max-w-[1600px] mx-auto">
               
                 <div className={cn(
                   "transition-all duration-300",
@@ -1272,7 +1308,10 @@ export default function App() {
                     />
                   </div>
                 </div>
-            </div>
+              </div>
+            ) : (
+              <EpsMetadataInjector />
+            )}
           </div>
         </div>
       </main>
