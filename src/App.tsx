@@ -41,6 +41,7 @@ import { AssetGrid } from './components/AssetGrid';
 import { MetadataPanel } from './components/MetadataPanel';
 import { BatchDownloadHub } from './components/BatchDownloadHub';
 import { EpsMetadataInjector } from './components/EpsMetadataInjector';
+import { TeePublicGenerator } from './components/TeePublicGenerator';
 
 // Import constants and types
 import { MODELS, CHANGELOG_DATA } from './constants';
@@ -132,7 +133,7 @@ export default function App() {
   const [startTime, setStartTime] = useState<number | null>(null);
   const [currentTime, setCurrentTime] = useState<number | null>(null);
   const [lastGenerationDuration, setLastGenerationDuration] = useState<number | null>(null);
-  const [currentPage, setCurrentPage] = useState<'generator' | 'injector'>('generator');
+  const [currentPage, setCurrentPage] = useState<'generator' | 'injector' | 'teepublic'>('generator');
 
   useEffect(() => {
     let interval: any;
@@ -1186,7 +1187,7 @@ export default function App() {
 
           <div className="flex-1 overflow-y-auto p-4 sm:p-8 custom-scrollbar pb-24 md:pb-8">
             {/* Page Tabs */}
-            <div className="flex justify-center mb-6 max-w-sm mx-auto">
+            <div className="flex justify-center mb-6 max-w-md mx-auto">
               <div className="bg-slate-100 p-1.5 rounded-2xl flex items-center gap-1.5 border border-slate-200/50 w-full shadow-inner">
                 <button 
                   onClick={() => setCurrentPage('generator')}
@@ -1213,6 +1214,19 @@ export default function App() {
                 >
                   <Layers className="w-3.5 h-3.5" />
                   Suntik EPS
+                </button>
+                <button 
+                  onClick={() => setCurrentPage('teepublic')}
+                  className={cn(
+                    "flex-1 py-1.5 sm:py-2 px-2 sm:px-3 rounded-xl text-[11px] sm:text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 sm:gap-2 transition-all duration-300",
+                    currentPage === 'teepublic' 
+                      ? "bg-white text-indigo-600 shadow-md shadow-indigo-100/30 font-black border border-slate-200/20" 
+                      : "text-slate-500 hover:text-slate-700 hover:bg-slate-50/50"
+                  )}
+                  id="tab-teepublic"
+                >
+                  <ImageIcon className="w-3.5 h-3.5" />
+                  TeePublic
                 </button>
               </div>
             </div>
@@ -1309,8 +1323,14 @@ export default function App() {
                   </div>
                 </div>
               </div>
-            ) : (
+            ) : currentPage === 'injector' ? (
               <EpsMetadataInjector />
+            ) : (
+              <TeePublicGenerator 
+                apiKeys={apiKeys}
+                setShowKeyModal={setShowKeyModal}
+                selectedModel={selectedModel}
+              />
             )}
           </div>
         </div>
