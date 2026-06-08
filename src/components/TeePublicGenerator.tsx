@@ -73,6 +73,10 @@ export function TeePublicGenerator({ apiKeys, setShowKeyModal, selectedModel }: 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
 
+  // Keep track of last successful API key and model indices for seamless rotation/memory
+  const lastSuccessKeyIndex = useRef<number>(0);
+  const lastSuccessModelIndex = useRef<number>(0);
+
   // Trigger toast alert
   const addToast = (msg: string, type: 'success' | 'err' | 'info' = 'success') => {
     const id = Date.now().toString() + Math.random();
@@ -191,8 +195,14 @@ export function TeePublicGenerator({ apiKeys, setShowKeyModal, selectedModel }: 
     setIsGenerating(true);
     addToast(`Memulai generate metadata untuk ${pendingDesigns.length} design...`, 'info');
 
-    // Use current API key selection with rotation
-    let keyIndex = 0;
+    // Use current successful indices as starting point or select model
+    let initialModelIndex = MODELS.findIndex(m => m.id === selectedModel);
+    if (initialModelIndex === -1) {
+      initialModelIndex = lastSuccessModelIndex.current % MODELS.length;
+    }
+    
+    let currentKeyIndex = lastSuccessKeyIndex.current % apiKeys.length;
+    let modelIndex = initialModelIndex;
     
     for (const design of pendingDesigns) {
       setCurrentProcessingId(design.id);
@@ -203,8 +213,8 @@ export function TeePublicGenerator({ apiKeys, setShowKeyModal, selectedModel }: 
       ));
 
       let success = false;
-      let keysTried = 0;
-      const totalKeys = apiKeys.length;
+      let modelsTried = 0;
+      const totalModels = MODELS.length;
       let lastError = 'Gagal memproses generator.';
 
       // Image to Base64
@@ -223,90 +233,113 @@ export function TeePublicGenerator({ apiKeys, setShowKeyModal, selectedModel }: 
         continue;
       }
 
-      while (!success && keysTried < totalKeys) {
-        const activeKey = apiKeys[keyIndex % totalKeys];
-        const ai = new GoogleGenAI({ apiKey: activeKey });
+      // Outer loop: Models rotation
+      while (!success && modelsTried < totalModels) {
+        const currentModelId = MODELS[modelIndex].id;
+        const modelName = MODELS[modelIndex].name;
         
-        // Find active model representation or default
-        const activeModelId = selectedModel || 'gemini-2.5-flash';
-        const modelName = MODELS.find(m => m.id === activeModelId)?.name || 'Gemini 2.5 Flash';
+        let keysTried = 0;
+        const totalKeys = apiKeys.length;
 
-        try {
-          const mimeType = design.file.type || 'image/png';
-          
-          const promptText = `Analyze this design image specifically for TeePublic (a print-on-demand e-commerce platform for t-shirts, hoodies, stickers, mugs, phone cases, notebooks and other customized apparel).
-          Generate visually compelling, highly search-optimized, and genuine metadata in JSON format with these exact fields:
+        // Inner loop: Keys rotation
+        while (!success && keysTried < totalKeys) {
+          const actualKeyIndex = currentKeyIndex % totalKeys;
+          const activeKey = apiKeys[actualKeyIndex];
+          const ai = new GoogleGenAI({ apiKey: activeKey });
 
-          1. title: Clear, high-sales, attractive design title. Do not start with generic words like "A", "An", "The". Make it natural, search-friendly, and describe the character/aesthetic/theme. Keep it under 60 characters.
-          2. mainTag: Exactly ONE (1) core tag/search query that represents the absolute main subject or general style of this design. It must be highly searched, lowercase, containing ONLY letters and numbers (no spaces or special characters/punctuation, e.g. "synthwave", "raccoon", "coding", "cats", "vaporwave", "minimalist").
-          3. description: A short, simple, and catchment description (1 to 2 sentences max) optimized for prospective retail buyers. Direct, elegant, and stylish. Include the design vibe.
-          4. supportingTags: Exactly 10 to 15 unique, highly relevant supporting tags describing the aesthetic, colors, style, themes, art style, humor, or specific items in the design. Put these in an array of clean lowercase strings. Each tag must be standard, alphanumeric, single words or connected-words, lowercase only.
-          5. matureContent: Determine if this design contains mature content (such as nudity, heavy graphic violence, strong suggestive sexual adult content, or highly offensive themes). Return "Yes" if it clearly does, otherwise return "No".
+          try {
+            const mimeType = design.file.type || 'image/png';
+            
+            const promptText = `Analyze this design image specifically for TeePublic (a print-on-demand e-commerce platform for t-shirts, hoodies, stickers, mugs, phone cases, notebooks and other customized apparel).
+            Generate visually compelling, highly search-optimized, and genuine metadata in JSON format with these exact fields:
 
-          Analyze the artistic details and visual properties with SEO in mind. Make sure values conform to standard JSON schema.`;
+            1. title: Clear, high-sales, attractive design title. Do not start with generic words like "A", "An", "The". Make it natural, search-friendly, and describe the character/aesthetic/theme. Keep it under 60 characters.
+            2. mainTag: Exactly ONE (1) core tag/search query that represents the absolute main subject or general style of this design. It must be highly searched, lowercase, containing ONLY letters and numbers (no spaces or special characters/punctuation, e.g. "synthwave", "raccoon", "coding", "cats", "vaporwave", "minimalist").
+            3. description: A short, simple, and catchment description (1 to 2 sentences max) optimized for prospective retail buyers. Direct, elegant, and stylish. Include the design vibe.
+            4. supportingTags: Exactly 10 to 15 unique, highly relevant supporting tags describing the aesthetic, colors, style, themes, art style, humor, or specific items in the design. Put these in an array of clean lowercase strings. Each tag must be standard, alphanumeric, single words or connected-words, lowercase only.
+            5. matureContent: Determine if this design contains mature content (such as nudity, heavy graphic violence, strong suggestive sexual adult content, or highly offensive themes). Return "Yes" if it clearly does, otherwise return "No".
 
-          const response = await ai.models.generateContent({
-            model: activeModelId,
-            contents: {
-              parts: [
-                { inlineData: { mimeType, data: base64Data } },
-                { text: promptText }
-              ],
-            },
-            config: {
-              responseMimeType: "application/json",
-              responseSchema: {
-                type: Type.OBJECT,
-                properties: {
-                  title: { type: Type.STRING },
-                  mainTag: { type: Type.STRING },
-                  description: { type: Type.STRING },
-                  supportingTags: { type: Type.ARRAY, items: { type: Type.STRING } },
-                  matureContent: { type: Type.STRING }
-                },
-                required: ["title", "mainTag", "description", "supportingTags", "matureContent"]
+            Analyze the artistic details and visual properties with SEO in mind. Make sure values conform to standard JSON schema.`;
+
+            const response = await ai.models.generateContent({
+              model: currentModelId,
+              contents: {
+                parts: [
+                  { inlineData: { mimeType, data: base64Data } },
+                  { text: promptText }
+                ],
+              },
+              config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                  type: Type.OBJECT,
+                  properties: {
+                    title: { type: Type.STRING },
+                    mainTag: { type: Type.STRING },
+                    description: { type: Type.STRING },
+                    supportingTags: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    matureContent: { type: Type.STRING }
+                  },
+                  required: ["title", "mainTag", "description", "supportingTags", "matureContent"]
+                }
               }
-            }
-          });
+            });
 
-          const resultText = response.text?.trim() || '{}';
-          const result = JSON.parse(resultText);
+            const resultText = response.text?.trim() || '{}';
+            const result = JSON.parse(resultText);
 
-          // Force clean tags format (clean lowercase alphabetic)
-          const cleanMainTag = (result.mainTag || '').toLowerCase().trim().replace(/[^a-z0-9]/g, '');
-          const cleanSupporting = (result.supportingTags || [])
-            .map((t: string) => t.toLowerCase().trim().replace(/[^a-z0-9]/g, ''))
-            .filter((t: string) => t && t !== cleanMainTag)
-            .slice(0, 15);
+            // Force clean tags format (clean lowercase alphabetic)
+            const cleanMainTag = (result.mainTag || '').toLowerCase().trim().replace(/[^a-z0-9]/g, '');
+            const cleanSupporting = (result.supportingTags || [])
+              .map((t: string) => t.toLowerCase().trim().replace(/[^a-z0-9]/g, ''))
+              .filter((t: string) => t && t !== cleanMainTag)
+              .slice(0, 15);
 
-          const metadata = {
-            title: result.title || design.file.name.replace(/\.[^/.]+$/, "").substring(0, 50),
-            mainTag: cleanMainTag || 'graphicdesign',
-            description: result.description || 'Cool unique graphic design.',
-            supportingTags: cleanSupporting.length > 0 ? cleanSupporting : ['art', 'illustration', 'vector', 'cool'],
-            matureContent: (result.matureContent === 'Yes' || result.matureContent === 'yes') ? ('Yes' as const) : ('No' as const),
-            modelUsed: modelName
-          };
+            const metadata = {
+              title: result.title || design.file.name.replace(/\.[^/.]+$/, "").substring(0, 50),
+              mainTag: cleanMainTag || 'graphicdesign',
+              description: result.description || 'Cool unique graphic design.',
+              supportingTags: cleanSupporting.length > 0 ? cleanSupporting : ['art', 'illustration', 'vector', 'cool'],
+              matureContent: (result.matureContent === 'Yes' || result.matureContent === 'yes') ? ('Yes' as const) : ('No' as const),
+              modelUsed: modelName
+            };
 
-          setDesigns(prev => prev.map(d => 
-            d.id === design.id ? { 
-              ...d, 
-              status: 'completed', 
-              metadata,
-              processingTime: 1 // Completed successfully
-            } : d
-          ));
+            setDesigns(prev => prev.map(d => 
+              d.id === design.id ? { 
+                ...d, 
+                status: 'completed', 
+                metadata,
+                processingTime: 1 // Completed successfully
+              } : d
+            ));
+            
+            success = true;
+            
+            // Save successful rotation indices to state to avoid testing failed slots in next items
+            lastSuccessKeyIndex.current = actualKeyIndex;
+            lastSuccessModelIndex.current = modelIndex;
+            
+            addToast(`Selesai memproses: ${design.file.name}`, 'success');
+
+          } catch (error) {
+            console.error(`TeePublic Gen Error with Key Index ${actualKeyIndex} on Model ${currentModelId}:`, error);
+            lastError = getErrorMessage(error);
+            
+            // Switch key and retry
+            currentKeyIndex++;
+            keysTried++;
+          }
+        }
+
+        if (!success) {
+          // Rotate to next model in MODELS list and reset key index to retry across all of them
+          modelIndex = (modelIndex + 1) % MODELS.length;
+          currentKeyIndex = 0;
+          modelsTried++;
           
-          success = true;
-          addToast(`Selesai memproses: ${design.file.name}`, 'success');
-
-        } catch (error) {
-          console.error(`TeePublic Gen Error with Key Index ${keyIndex}:`, error);
-          lastError = getErrorMessage(error);
-          
-          // Switch key and retry
-          keyIndex++;
-          keysTried++;
+          if (modelsTried < totalModels) {
+            addToast(`Pencarian resource... mencoba model ${MODELS[modelIndex].name}`, 'info');
+          }
         }
       }
 
@@ -315,8 +348,8 @@ export function TeePublicGenerator({ apiKeys, setShowKeyModal, selectedModel }: 
           d.id === design.id ? { 
             ...d, 
             status: 'error', 
-            error: lastError.includes('quota') || lastError.includes('Rate Limit')
-              ? 'API Key mencapai batas limit kuota. Coba tambahkan API Key lainnya.' 
+            error: lastError.includes('quota') || lastError.includes('Rate Limit') || lastError.includes('429')
+              ? 'API Key mencapai batas limit kuota / Rate Limit.' 
               : lastError 
           } : d
         ));
