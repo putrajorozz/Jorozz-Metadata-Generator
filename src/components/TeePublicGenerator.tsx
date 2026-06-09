@@ -48,6 +48,33 @@ interface TeePublicGeneratorProps {
   selectedModel: string;
 }
 
+/**
+ * Utility to split tags into individual single words, stripping out spaces/hyphens/underscores,
+ * lowercasing them, removing duplicates, and filtering out the main tag.
+ */
+const cleanAndSplitToSingleWords = (tags: string[], mainTagToExclude?: string): string[] => {
+  const seen = new Set<string>();
+  const list: string[] = [];
+  const excludePart = mainTagToExclude ? mainTagToExclude.toLowerCase().trim().replace(/[^a-z0-9]/g, '') : null;
+
+  for (const t of tags) {
+    if (!t) continue;
+    // Split by spaces, commas, hyphens, underscores, slashes, or other common dividers
+    const words = t.split(/[\s,_\-\\/]+/);
+    for (const w of words) {
+      const cleanWord = w.toLowerCase().trim().replace(/[^a-z0-9]/g, '');
+      if (cleanWord) {
+        if (excludePart && cleanWord === excludePart) continue;
+        if (!seen.has(cleanWord)) {
+          seen.add(cleanWord);
+          list.push(cleanWord);
+        }
+      }
+    }
+  }
+  return list;
+};
+
 export function TeePublicGenerator({ apiKeys, setShowKeyModal, selectedModel }: TeePublicGeneratorProps) {
   const [designs, setDesigns] = useState<TeePublicDesign[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -256,7 +283,7 @@ export function TeePublicGenerator({ apiKeys, setShowKeyModal, selectedModel }: 
             1. title: Clear, high-sales, attractive design title. Do not start with generic words like "A", "An", "The". Make it natural, search-friendly, and describe the character/aesthetic/theme. Keep it under 60 characters.
             2. mainTag: Exactly ONE (1) core tag/search query that represents the absolute main subject or general style of this design. It must be highly searched, lowercase, containing ONLY letters and numbers (no spaces or special characters/punctuation, e.g. "synthwave", "raccoon", "coding", "cats", "vaporwave", "minimalist").
             3. description: A short, simple, and catchment description (1 to 2 sentences max) optimized for prospective retail buyers. Direct, elegant, and stylish. Include the design vibe.
-            4. supportingTags: Exactly 10 to 15 unique, highly relevant supporting tags describing the aesthetic, colors, style, themes, art style, humor, or specific items in the design. Put these in an array of clean lowercase strings. Each tag must be standard, alphanumeric, single words or connected-words, lowercase only.
+            4. supportingTags: Exactly 10 to 15 unique, highly relevant supporting tags describing the aesthetic, colors, style, themes, art style, humor, or specific items in the design. Put these in an array of clean lowercase strings. Each tag MUST be strictly a single word (1 word only, no combined words or phrases like 'golden dove' - split them as separate individual words if necessary like 'golden', 'dove', no spaces, alphanumeric, lowercase only).
             5. matureContent: Determine if this design contains mature content (such as nudity, heavy graphic violence, strong suggestive sexual adult content, or highly offensive themes). Return "Yes" if it clearly does, otherwise return "No".
 
             Analyze the artistic details and visual properties with SEO in mind. Make sure values conform to standard JSON schema.`;
@@ -288,12 +315,9 @@ export function TeePublicGenerator({ apiKeys, setShowKeyModal, selectedModel }: 
             const resultText = response.text?.trim() || '{}';
             const result = JSON.parse(resultText);
 
-            // Force clean tags format (clean lowercase alphabetic)
+            // Force clean tags format (clean lowercase alphabetic single words)
             const cleanMainTag = (result.mainTag || '').toLowerCase().trim().replace(/[^a-z0-9]/g, '');
-            const cleanSupporting = (result.supportingTags || [])
-              .map((t: string) => t.toLowerCase().trim().replace(/[^a-z0-9]/g, ''))
-              .filter((t: string) => t && t !== cleanMainTag)
-              .slice(0, 15);
+            const cleanSupporting = cleanAndSplitToSingleWords(result.supportingTags || [], cleanMainTag).slice(0, 15);
 
             const metadata = {
               title: result.title || design.file.name.replace(/\.[^/.]+$/, "").substring(0, 50),
@@ -443,13 +467,10 @@ export function TeePublicGenerator({ apiKeys, setShowKeyModal, selectedModel }: 
   const saveDesignEdit = (id: string) => {
     if (!editFormData) return;
 
-    // Split and clean supporting tags
-    const cleanSupporting = editFormData.supportingTags
-      .split(',')
-      .map(k => k.trim().toLowerCase().replace(/[^a-z0-9]/g, ''))
-      .filter(Boolean);
-
     const cleanMainTag = editFormData.mainTag.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+
+    // Split and clean supporting tags to guarantee strictly single words
+    const cleanSupporting = cleanAndSplitToSingleWords(editFormData.supportingTags.split(','), cleanMainTag);
 
     setDesigns(prev => prev.map(d => {
       if (d.id === id) {
