@@ -15,6 +15,11 @@ export const MODELS = [
   { id: "gemini-3-flash-preview", name: "Gemini 3 Flash (Free Tier)", description: "Keseimbangan kualitas & kecepatan" },
 ];
 
+export const GROQ_MODELS = [
+  { id: "meta-llama/llama-4-scout-17b-16e-instruct", name: "Llama 4 Scout (17B)", description: "Model Llama 4 standard yang efisien" },
+  { id: "meta-llama/llama-4-maverick", name: "Llama 4 Maverick", description: "Model Llama 4 Maverick lebih kreatif" }
+];
+
 export const CHANGELOG_DATA = [
   {
     id: "v1.2.0",

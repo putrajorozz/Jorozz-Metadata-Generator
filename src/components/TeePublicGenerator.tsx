@@ -81,6 +81,17 @@ export function TeePublicGenerator({ apiKeys, setShowKeyModal, selectedModel }: 
   const [currentProcessingId, setCurrentProcessingId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   
+  // AI Engine mode state: 'gemini' | 'groq'
+  const [aiEngine, setAiEngine] = useState<'gemini' | 'groq'>('gemini');
+  
+  // Groq / Grok API Keys state
+  const [groqKeys, setGroqKeys] = useState<string[]>(() => {
+    const saved = localStorage.getItem('groq_api_keys');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [selectedGroqModel, setSelectedGroqModel] = useState<string>('meta-llama/llama-4-scout-17b-16e-instruct');
+  const [newGroqKey, setNewGroqKey] = useState('');
+
   // Local states for notifications
   const [toasts, setToasts] = useState<{ id: string; msg: string; type: 'success' | 'err' | 'info' }[]>([]);
   
@@ -111,6 +122,28 @@ export function TeePublicGenerator({ apiKeys, setShowKeyModal, selectedModel }: 
     setTimeout(() => {
       setToasts(prev => prev.filter(t => t.id !== id));
     }, 4500);
+  };
+
+  // Add Groq Key Handler
+  const handleAddGroqKey = () => {
+    const raw = newGroqKey.trim();
+    if (!raw) return;
+    const cleanKeys = raw.split(/[\n,\s]+/).map(k => k.trim()).filter(Boolean);
+    if (cleanKeys.length === 0) return;
+    
+    const updated = [...groqKeys, ...cleanKeys];
+    setGroqKeys(updated);
+    localStorage.setItem('groq_api_keys', JSON.stringify(updated));
+    setNewGroqKey('');
+    addToast(`${cleanKeys.length} Groq API Key berhasil disuntikkan.`, 'success');
+  };
+
+  // Remove Groq Key Handler
+  const handleRemoveGroqKey = (index: number) => {
+    const updated = groqKeys.filter((_, i) => i !== index);
+    setGroqKeys(updated);
+    localStorage.setItem('groq_api_keys', JSON.stringify(updated));
+    addToast('Groq API Key telah dihapus!', 'info');
   };
 
   // Drag and drop events
@@ -207,10 +240,17 @@ export function TeePublicGenerator({ apiKeys, setShowKeyModal, selectedModel }: 
   const generateTeePublicMetadata = async () => {
     if (designs.length === 0 || isGenerating) return;
 
-    if (apiKeys.length === 0) {
-      addToast('Silakan masukkan Gemini API Key terlebih dahulu di modal kunci!', 'err');
-      setShowKeyModal(true);
-      return;
+    if (aiEngine === 'gemini') {
+      if (apiKeys.length === 0) {
+        addToast('Silakan masukkan Gemini API Key terlebih dahulu di modal kunci!', 'err');
+        setShowKeyModal(true);
+        return;
+      }
+    } else {
+      if (groqKeys.length === 0) {
+        addToast('Silakan masukkan Groq API Key terlebih dahulu di panel pengaturan bawah!', 'err');
+        return;
+      }
     }
 
     const pendingDesigns = designs.filter(d => d.status !== 'completed');
@@ -220,15 +260,22 @@ export function TeePublicGenerator({ apiKeys, setShowKeyModal, selectedModel }: 
     }
 
     setIsGenerating(true);
-    addToast(`Memulai generate metadata untuk ${pendingDesigns.length} design...`, 'info');
+    addToast(`Memulai generate metadata dengan ${aiEngine === 'gemini' ? 'Gemini' : 'Groq'} untuk ${pendingDesigns.length} design...`, 'info');
+
+    const savedAutoRotate = localStorage.getItem('auto_rotate_model');
+    const autoRotateModel = savedAutoRotate !== 'false';
 
     // Use current successful indices as starting point or select model
     let initialModelIndex = MODELS.findIndex(m => m.id === selectedModel);
-    if (initialModelIndex === -1) {
-      initialModelIndex = lastSuccessModelIndex.current % MODELS.length;
+    if (initialModelIndex === -1 || !autoRotateModel) {
+      if (!autoRotateModel && initialModelIndex === -1) {
+        initialModelIndex = 0;
+      } else if (autoRotateModel) {
+        initialModelIndex = lastSuccessModelIndex.current % MODELS.length;
+      }
     }
     
-    let currentKeyIndex = lastSuccessKeyIndex.current % apiKeys.length;
+    let currentKeyIndex = lastSuccessKeyIndex.current % (aiEngine === 'gemini' ? apiKeys.length : groqKeys.length);
     let modelIndex = initialModelIndex;
     
     for (const design of pendingDesigns) {
@@ -241,7 +288,7 @@ export function TeePublicGenerator({ apiKeys, setShowKeyModal, selectedModel }: 
 
       let success = false;
       let modelsTried = 0;
-      const totalModels = MODELS.length;
+      const totalModels = (aiEngine === 'gemini' && autoRotateModel) ? MODELS.length : 1;
       let lastError = 'Gagal memproses generator.';
 
       // Image to Base64
@@ -260,23 +307,116 @@ export function TeePublicGenerator({ apiKeys, setShowKeyModal, selectedModel }: 
         continue;
       }
 
-      // Outer loop: Models rotation
-      while (!success && modelsTried < totalModels) {
-        const currentModelId = MODELS[modelIndex].id;
-        const modelName = MODELS[modelIndex].name;
-        
-        let keysTried = 0;
-        const totalKeys = apiKeys.length;
+      if (aiEngine === 'gemini') {
+        // Outer loop: Models rotation
+        while (!success && modelsTried < totalModels) {
+          const currentModelId = MODELS[modelIndex].id;
+          const modelName = MODELS[modelIndex].name;
+          
+          let keysTried = 0;
+          const totalKeys = apiKeys.length;
 
-        // Inner loop: Keys rotation
+          // Inner loop: Keys rotation
+          while (!success && keysTried < totalKeys) {
+            const actualKeyIndex = currentKeyIndex % totalKeys;
+            const activeKey = apiKeys[actualKeyIndex];
+            const ai = new GoogleGenAI({ apiKey: activeKey });
+
+            try {
+              const mimeType = design.file.type || 'image/png';
+              
+              const promptText = `Analyze this design image specifically for TeePublic (a print-on-demand e-commerce platform for t-shirts, hoodies, stickers, mugs, phone cases, notebooks and other customized apparel).
+              Generate visually compelling, highly search-optimized, and genuine metadata in JSON format with these exact fields:
+
+              1. title: Clear, high-sales, attractive design title. Do not start with generic words like "A", "An", "The". Make it natural, search-friendly, and describe the character/aesthetic/theme. Keep it under 60 characters.
+              2. mainTag: Exactly ONE (1) core tag/search query that represents the absolute main subject or general style of this design. It must be highly searched, lowercase, containing ONLY letters and numbers (no spaces or special characters/punctuation, e.g. "synthwave", "raccoon", "coding", "cats", "vaporwave", "minimalist").
+              3. description: A short, simple, and catchment description (1 to 2 sentences max) optimized for prospective retail buyers. Direct, elegant, and stylish. Include the design vibe.
+              4. supportingTags: Exactly 10 to 15 unique, highly relevant supporting tags describing the aesthetic, colors, style, themes, art style, humor, or specific items in the design. Put these in an array of clean lowercase strings. Each tag MUST be strictly a single word (1 word only, no combined words or phrases like 'golden dove' - split them as separate individual words if necessary like 'golden', 'dove', no spaces, alphanumeric, lowercase only).
+              5. matureContent: Determine if this design contains mature content (such as nudity, heavy graphic violence, strong suggestive sexual adult content, or highly offensive themes). Return "Yes" if it clearly does, otherwise return "No".
+
+              Analyze the artistic details and visual properties with SEO in mind. Make sure values conform to standard JSON schema.`;
+
+              const response = await ai.models.generateContent({
+                model: currentModelId,
+                contents: {
+                  parts: [
+                    { inlineData: { mimeType, data: base64Data } },
+                    { text: promptText }
+                  ],
+                },
+                config: {
+                  responseMimeType: "application/json",
+                  responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                      title: { type: Type.STRING },
+                      mainTag: { type: Type.STRING },
+                      description: { type: Type.STRING },
+                      supportingTags: { type: Type.ARRAY, items: { type: Type.STRING } },
+                      matureContent: { type: Type.STRING }
+                    },
+                    required: ["title", "mainTag", "description", "supportingTags", "matureContent"]
+                  }
+                }
+              });
+
+              const resultText = response.text?.trim() || '{}';
+              const result = JSON.parse(resultText);
+
+              const cleanMainTag = (result.mainTag || '').toLowerCase().trim().replace(/[^a-z0-9]/g, '');
+              const cleanSupporting = cleanAndSplitToSingleWords(result.supportingTags || [], cleanMainTag).slice(0, 15);
+
+              const metadata = {
+                title: result.title || design.file.name.replace(/\.[^/.]+$/, "").substring(0, 50),
+                mainTag: cleanMainTag || 'graphicdesign',
+                description: result.description || 'Cool unique graphic design.',
+                supportingTags: cleanSupporting.length > 0 ? cleanSupporting : ['art', 'illustration', 'vector', 'cool'],
+                matureContent: (result.matureContent === 'Yes' || result.matureContent === 'yes') ? ('Yes' as const) : ('No' as const),
+                modelUsed: modelName
+              };
+
+              setDesigns(prev => prev.map(d => 
+                d.id === design.id ? { 
+                  ...d, 
+                  status: 'completed', 
+                  metadata,
+                  processingTime: 1
+                } : d
+              ));
+              
+              success = true;
+              lastSuccessKeyIndex.current = actualKeyIndex;
+              lastSuccessModelIndex.current = modelIndex;
+              addToast(`Selesai memproses: ${design.file.name}`, 'success');
+
+            } catch (error) {
+              console.error(`TeePublic Gen Error with Key Index ${actualKeyIndex} on Model ${currentModelId}:`, error);
+              lastError = getErrorMessage(error);
+              currentKeyIndex++;
+              keysTried++;
+            }
+          }
+
+          if (!success) {
+            modelIndex = (modelIndex + 1) % MODELS.length;
+            currentKeyIndex = 0;
+            modelsTried++;
+            if (modelsTried < totalModels) {
+              addToast(`Pencarian resource... mencoba model ${MODELS[modelIndex].name}`, 'info');
+            }
+          }
+        }
+      } else {
+        // Groq Engine Logic
+        let keysTried = 0;
+        const totalKeys = groqKeys.length;
+
         while (!success && keysTried < totalKeys) {
           const actualKeyIndex = currentKeyIndex % totalKeys;
-          const activeKey = apiKeys[actualKeyIndex];
-          const ai = new GoogleGenAI({ apiKey: activeKey });
+          const activeKey = groqKeys[actualKeyIndex];
 
           try {
             const mimeType = design.file.type || 'image/png';
-            
             const promptText = `Analyze this design image specifically for TeePublic (a print-on-demand e-commerce platform for t-shirts, hoodies, stickers, mugs, phone cases, notebooks and other customized apparel).
             Generate visually compelling, highly search-optimized, and genuine metadata in JSON format with these exact fields:
 
@@ -286,36 +426,52 @@ export function TeePublicGenerator({ apiKeys, setShowKeyModal, selectedModel }: 
             4. supportingTags: Exactly 10 to 15 unique, highly relevant supporting tags describing the aesthetic, colors, style, themes, art style, humor, or specific items in the design. Put these in an array of clean lowercase strings. Each tag MUST be strictly a single word (1 word only, no combined words or phrases like 'golden dove' - split them as separate individual words if necessary like 'golden', 'dove', no spaces, alphanumeric, lowercase only).
             5. matureContent: Determine if this design contains mature content (such as nudity, heavy graphic violence, strong suggestive sexual adult content, or highly offensive themes). Return "Yes" if it clearly does, otherwise return "No".
 
-            Analyze the artistic details and visual properties with SEO in mind. Make sure values conform to standard JSON schema.`;
+            Analyze the artistic details and visual properties with SEO in mind. Make sure values conform to standard JSON schema. Return raw JSON text without any markdown wrapper/decorations except the valid JSON string itself.`;
 
-            const response = await ai.models.generateContent({
-              model: currentModelId,
-              contents: {
-                parts: [
-                  { inlineData: { mimeType, data: base64Data } },
-                  { text: promptText }
-                ],
+            const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+              method: "POST",
+              headers: {
+                "Authorization": `Bearer ${activeKey}`,
+                "Content-Type": "application/json"
               },
-              config: {
-                responseMimeType: "application/json",
-                responseSchema: {
-                  type: Type.OBJECT,
-                  properties: {
-                    title: { type: Type.STRING },
-                    mainTag: { type: Type.STRING },
-                    description: { type: Type.STRING },
-                    supportingTags: { type: Type.ARRAY, items: { type: Type.STRING } },
-                    matureContent: { type: Type.STRING }
-                  },
-                  required: ["title", "mainTag", "description", "supportingTags", "matureContent"]
-                }
-              }
+              body: JSON.stringify({
+                model: selectedGroqModel,
+                messages: [
+                  {
+                    role: "user",
+                    content: [
+                      {
+                        type: "text",
+                        text: promptText
+                      },
+                      {
+                        type: "image_url",
+                        image_url: {
+                          url: `data:${mimeType};base64,${base64Data}`
+                        }
+                      }
+                    ]
+                  }
+                ],
+                response_format: { type: "json_object" },
+                temperature: 0.2
+              })
             });
 
-            const resultText = response.text?.trim() || '{}';
+            if (!response.ok) {
+              const errBody = await response.json().catch(() => ({}));
+              throw new Error(errBody.error?.message || `HTTP ${response.status}`);
+            }
+
+            const responseData = await response.json();
+            let resultText = responseData.choices?.[0]?.message?.content?.trim() || '{}';
+            
+            if (resultText.startsWith('```')) {
+              resultText = resultText.replace(/^```(?:json)?\n?|```$/g, '').trim();
+            }
+
             const result = JSON.parse(resultText);
 
-            // Force clean tags format (clean lowercase alphabetic single words)
             const cleanMainTag = (result.mainTag || '').toLowerCase().trim().replace(/[^a-z0-9]/g, '');
             const cleanSupporting = cleanAndSplitToSingleWords(result.supportingTags || [], cleanMainTag).slice(0, 15);
 
@@ -325,7 +481,11 @@ export function TeePublicGenerator({ apiKeys, setShowKeyModal, selectedModel }: 
               description: result.description || 'Cool unique graphic design.',
               supportingTags: cleanSupporting.length > 0 ? cleanSupporting : ['art', 'illustration', 'vector', 'cool'],
               matureContent: (result.matureContent === 'Yes' || result.matureContent === 'yes') ? ('Yes' as const) : ('No' as const),
-              modelUsed: modelName
+              modelUsed: `Groq (${
+                selectedGroqModel.includes("llama-4-scout") ? "Llama 4 Scout" :
+                selectedGroqModel.includes("llama-4-maverick") ? "Llama 4 Maverick" :
+                "Llama 4"
+              })`
             };
 
             setDesigns(prev => prev.map(d => 
@@ -333,36 +493,19 @@ export function TeePublicGenerator({ apiKeys, setShowKeyModal, selectedModel }: 
                 ...d, 
                 status: 'completed', 
                 metadata,
-                processingTime: 1 // Completed successfully
+                processingTime: 1
               } : d
             ));
             
             success = true;
-            
-            // Save successful rotation indices to state to avoid testing failed slots in next items
             lastSuccessKeyIndex.current = actualKeyIndex;
-            lastSuccessModelIndex.current = modelIndex;
-            
-            addToast(`Selesai memproses: ${design.file.name}`, 'success');
+            addToast(`Selesai memproses (Groq): ${design.file.name}`, 'success');
 
           } catch (error) {
-            console.error(`TeePublic Gen Error with Key Index ${actualKeyIndex} on Model ${currentModelId}:`, error);
+            console.error(`TeePublic Groq Error with Key Index ${actualKeyIndex} on Model ${selectedGroqModel}:`, error);
             lastError = getErrorMessage(error);
-            
-            // Switch key and retry
             currentKeyIndex++;
             keysTried++;
-          }
-        }
-
-        if (!success) {
-          // Rotate to next model in MODELS list and reset key index to retry across all of them
-          modelIndex = (modelIndex + 1) % MODELS.length;
-          currentKeyIndex = 0;
-          modelsTried++;
-          
-          if (modelsTried < totalModels) {
-            addToast(`Pencarian resource... mencoba model ${MODELS[modelIndex].name}`, 'info');
           }
         }
       }
@@ -747,7 +890,95 @@ export function TeePublicGenerator({ apiKeys, setShowKeyModal, selectedModel }: 
             </div>
 
             {/* Bottom bulk trigger panel */}
-            <div className="p-3 border-t border-slate-100 space-y-2 bg-slate-50/80">
+            <div className="p-3 border-t border-slate-100 space-y-3 bg-slate-50/80">
+              {/* Selector Mode Engine (Gemini / Groq) */}
+              <div className="space-y-2.5 bg-white p-3 rounded-2xl border border-slate-200/80 shadow-sm">
+                <div className="flex justify-between items-center">
+                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider">Engine AI / Model</span>
+                  <span className="text-[10px] font-mono font-bold text-slate-400">Pilihan model</span>
+                </div>
+                
+                <div className="flex bg-slate-100 p-0.5 rounded-lg gap-0.5">
+                  <button
+                    onClick={() => setAiEngine('gemini')}
+                    className={cn(
+                      "flex-1 py-1.5 rounded-md text-[10px] font-black uppercase tracking-wider transition-all",
+                      aiEngine === 'gemini'
+                        ? "bg-white text-indigo-600 shadow-sm"
+                        : "text-slate-500 hover:text-slate-700"
+                    )}
+                  >
+                    Gemini
+                  </button>
+                  <button
+                    onClick={() => setAiEngine('groq')}
+                    className={cn(
+                      "flex-1 py-1.5 rounded-md text-[10px] font-black uppercase tracking-wider transition-all",
+                      aiEngine === 'groq'
+                        ? "bg-white text-pink-600 shadow-sm"
+                        : "text-slate-500 hover:text-slate-700"
+                    )}
+                  >
+                    Groq (Llama)
+                  </button>
+                </div>
+
+                {/* Sub-setting conditional view */}
+                {aiEngine === 'gemini' ? (
+                  <div className="text-[10px] font-bold text-slate-500 flex justify-between items-center py-0.5 px-0.5">
+                    <span>Model: Rotasi Gemini</span>
+                    <span className="text-[9px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-extrabold">{apiKeys.length} Key Aktif</span>
+                  </div>
+                ) : (
+                  <div className="space-y-2 pt-1.5 border-t border-slate-100">
+                    <div>
+                      <select
+                        value={selectedGroqModel}
+                        onChange={(e) => setSelectedGroqModel(e.target.value)}
+                        className="w-full text-[10px] font-bold text-slate-600 bg-slate-50 border border-slate-200 rounded-md p-1.5 focus:outline-none"
+                      >
+                        <option value="meta-llama/llama-4-scout-17b-16e-instruct">Llama 4 Scout (17B)</option>
+                        <option value="meta-llama/llama-4-maverick">Llama 4 Maverick</option>
+                      </select>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <div className="flex gap-1">
+                        <input
+                          type="password"
+                          placeholder="Masukkan Key Groq / Grok..."
+                          value={newGroqKey}
+                          onChange={(e) => setNewGroqKey(e.target.value)}
+                          className="flex-1 text-[10px] font-mono bg-slate-50 border border-slate-200 rounded-md px-2 py-1 focus:outline-none focus:border-pink-500"
+                        />
+                        <button
+                          onClick={handleAddGroqKey}
+                          className="px-2.5 py-1 bg-pink-600 text-white font-bold text-[9px] rounded-md hover:bg-pink-700 transition-colors shrink-0"
+                        >
+                          Suntik
+                        </button>
+                      </div>
+
+                      {groqKeys.length > 0 && (
+                        <div className="max-h-16 overflow-y-auto custom-scrollbar border border-slate-100 rounded bg-slate-50 p-1 divide-y divide-slate-100">
+                          {groqKeys.map((key, ki) => (
+                            <div key={ki} className="flex items-center justify-between py-0.5 px-1 text-[8px] font-mono text-slate-500">
+                              <span className="truncate max-w-[120px]">{key.substring(0, 8)}•••{key.substring(key.length - 4)}</span>
+                              <button
+                                onClick={() => handleRemoveGroqKey(ki)}
+                                className="hover:text-red-500 text-slate-400"
+                              >
+                                <X className="w-2.5 h-2.5" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <button
                 disabled={isGenerating || pendingCount + errorCount === 0}
                 onClick={generateTeePublicMetadata}
