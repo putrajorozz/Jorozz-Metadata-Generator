@@ -1437,8 +1437,8 @@ export default function App() {
     const duplicateKeys: string[] = [];
 
     potentialKeys.forEach(key => {
-      // Basic validation: Gemini API keys usually start with AIza
-      if (!key.startsWith("AIza")) {
+      // Basic validation: Gemini API keys start with AIza or AQ.
+      if (!key.startsWith("AIza") && !key.startsWith("AQ.")) {
         invalidKeys.push(key);
       } else if (apiKeys.includes(key)) {
         duplicateKeys.push(key);
@@ -1462,7 +1462,7 @@ export default function App() {
 
     if (invalidKeys.length > 0) {
       if (potentialKeys.length === 1) {
-        addToast("Format API Key tidak valid. Harus dimulai dengan 'AIza'.", "error");
+        addToast("Format API Key tidak valid. Harus dimulai dengan 'AIza' atau 'AQ.'.", "error");
       } else {
         addToast(`${invalidKeys.length} key dilewati karena format tidak valid`, "error");
       }
@@ -1870,7 +1870,7 @@ export default function App() {
                       </div>
                       <p className="text-[10px] text-slate-400 px-1">
                         <Info className="w-3 h-3 inline mr-1" />
-                        Bisa memasukkan banyak key / log sekaligus dipisah baris baru (dimulai AIza).
+                        Bisa memasukkan banyak key / log sekaligus dipisah baris baru (dimulai AIza atau AQ.).
                       </p>
                     </div>
 
