@@ -4,7 +4,9 @@ import {
   Key, 
   Info, 
   Plus, 
-  Star 
+  Star,
+  Volume2,
+  VolumeX
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
@@ -23,6 +25,10 @@ interface TopHeaderProps {
   setShowInfoPage: (show: boolean) => void;
   open: () => void;
   modelDropdownRef: RefObject<HTMLDivElement | null>;
+  audioVolume: number;
+  setAudioVolume: (volume: number) => void;
+  isAudioMuted: boolean;
+  toggleAudioMute: () => void;
 }
 
 export function TopHeader({
@@ -36,7 +42,11 @@ export function TopHeader({
   setShowKeyModal,
   setShowInfoPage,
   open,
-  modelDropdownRef
+  modelDropdownRef,
+  audioVolume,
+  setAudioVolume,
+  isAudioMuted,
+  toggleAudioMute
 }: TopHeaderProps) {
   return (
     <header className="p-3 sm:p-4 border-b border-slate-200 bg-white/60 backdrop-blur-md flex items-center justify-between sticky top-0 z-30">
@@ -132,6 +142,33 @@ export function TopHeader({
             <span className="absolute top-1 right-1 w-2 h-2 bg-indigo-500 rounded-full border border-white" />
           )}
         </button>
+
+        {/* Volume & Mute Controller */}
+        <div className="flex items-center gap-1 bg-slate-100/80 hover:bg-slate-200 border border-slate-200/50 p-1.5 rounded-xl transition-all group max-w-[40px] hover:max-w-[120px] duration-300 overflow-hidden shrink-0">
+          <button
+            onClick={toggleAudioMute}
+            className="p-1 text-slate-500 hover:text-indigo-600 transition-colors rounded-lg shrink-0"
+            title={isAudioMuted ? "Aktifkan Suara" : "Bungkam Suara"}
+            id="btn-toggle-mute"
+          >
+            {isAudioMuted ? (
+              <VolumeX className="w-4 h-4 text-rose-500" />
+            ) : (
+              <Volume2 className="w-4 h-4 text-indigo-500" />
+            )}
+          </button>
+          <input
+            type="range"
+            min="0"
+            max="1"
+            step="0.05"
+            value={isAudioMuted ? 0 : audioVolume}
+            onChange={(e) => setAudioVolume(parseFloat(e.target.value))}
+            className="w-0 opacity-0 group-hover:w-16 group-hover:opacity-100 transition-all duration-300 h-1 accent-indigo-600 cursor-pointer outline-none shrink-0"
+            title={`Volume: ${Math.round(audioVolume * 100)}%`}
+          />
+        </div>
+
         <button 
           onClick={() => setShowInfoPage(true)}
           className="p-2 hover:bg-slate-100 rounded-xl text-slate-500 transition-colors"

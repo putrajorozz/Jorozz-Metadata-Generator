@@ -115,16 +115,50 @@ export default function App() {
     });
   };
 
+  const [audioVolume, setAudioVolume] = useState<number>(() => {
+    const saved = localStorage.getItem('audio_volume');
+    return saved !== null ? parseFloat(saved) : 0.5;
+  });
+
+  const [isAudioMuted, setIsAudioMuted] = useState<boolean>(() => {
+    const saved = localStorage.getItem('is_audio_muted');
+    return saved === 'true';
+  });
+
   useEffect(() => {
     chimeAudio.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
     successAudio.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2013/2013-preview.mp3');
     completeAudio.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2015/2015-preview.mp3'); // Different sound for batch finish
-    
-    // Volume settings
-    if (chimeAudio.current) chimeAudio.current.volume = 0.4;
-    if (successAudio.current) successAudio.current.volume = 0.5;
-    if (completeAudio.current) completeAudio.current.volume = 0.9; // Higher volume for finish
   }, []);
+
+  useEffect(() => {
+    if (chimeAudio.current) {
+      chimeAudio.current.volume = isAudioMuted ? 0 : audioVolume * 0.4;
+      chimeAudio.current.muted = isAudioMuted;
+    }
+    if (successAudio.current) {
+      successAudio.current.volume = isAudioMuted ? 0 : audioVolume * 0.5;
+      successAudio.current.muted = isAudioMuted;
+    }
+    if (completeAudio.current) {
+      completeAudio.current.volume = isAudioMuted ? 0 : audioVolume * 0.9;
+      completeAudio.current.muted = isAudioMuted;
+    }
+  }, [audioVolume, isAudioMuted]);
+
+  const handleVolumeChange = (newVolume: number) => {
+    setAudioVolume(newVolume);
+    localStorage.setItem('audio_volume', newVolume.toString());
+  };
+
+  const handleToggleMute = () => {
+    setIsAudioMuted(prev => {
+      const next = !prev;
+      localStorage.setItem('is_audio_muted', next.toString());
+      addToast(next ? "Audio DIBUNGKAM (Mute)" : "Audio DIAKTIFKAN (Unmute)", next ? "info" : "success");
+      return next;
+    });
+  };
 
   const playChime = () => chimeAudio.current?.play().catch(() => {});
   const playSuccess = () => successAudio.current?.play().catch(() => {});
@@ -1598,6 +1632,10 @@ export default function App() {
             showModelDropdown={showModelDropdown}
             setShowModelDropdown={setShowModelDropdown}
             modelDropdownRef={modelDropdownRef}
+            audioVolume={audioVolume}
+            setAudioVolume={handleVolumeChange}
+            isAudioMuted={isAudioMuted}
+            toggleAudioMute={handleToggleMute}
           />
 
           {/* Progress Bar */}
