@@ -18,7 +18,10 @@ import {
   FileText,
   RefreshCw,
   X,
-  AlertTriangle
+  AlertTriangle,
+  Pause,
+  Play,
+  Square
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
@@ -78,6 +81,10 @@ const cleanAndSplitToSingleWords = (tags: string[], mainTagToExclude?: string): 
 export function TeePublicGenerator({ apiKeys, setShowKeyModal, selectedModel }: TeePublicGeneratorProps) {
   const [designs, setDesigns] = useState<TeePublicDesign[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const isPausedRef = useRef(false);
+  const isCancelledRef = useRef(false);
+  const pausePromiseResolveRef = useRef<(() => void) | null>(null);
   const [currentProcessingId, setCurrentProcessingId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   
@@ -236,6 +243,39 @@ export function TeePublicGenerator({ apiKeys, setShowKeyModal, selectedModel }: 
     return String(error);
   };
 
+  const pauseTeePublicGeneration = () => {
+    if (!isGenerating || isPaused) return;
+    isPausedRef.current = true;
+    setIsPaused(true);
+    addToast("⏸️ Proses generate TeePublic dijeda (Paused)", "info");
+  };
+
+  const resumeTeePublicGeneration = () => {
+    if (!isGenerating || !isPaused) return;
+    isPausedRef.current = false;
+    setIsPaused(false);
+    if (pausePromiseResolveRef.current) {
+      pausePromiseResolveRef.current();
+      pausePromiseResolveRef.current = null;
+    }
+    addToast("▶️ Melanjutkan proses generate TeePublic...", "info");
+  };
+
+  const stopTeePublicGeneration = () => {
+    if (!isGenerating) return;
+    isCancelledRef.current = true;
+    isPausedRef.current = false;
+    setIsPaused(false);
+    if (pausePromiseResolveRef.current) {
+      pausePromiseResolveRef.current();
+      pausePromiseResolveRef.current = null;
+    }
+    setIsGenerating(false);
+    setCurrentProcessingId(null);
+    setDesigns(prev => prev.map(d => d.status === 'processing' ? { ...d, status: 'pending' } : d));
+    addToast("⏹️ Proses generate TeePublic dihentikan (Stopped)", "info");
+  };
+
   // AI Content Generator for TeePublic
   const generateTeePublicMetadata = async () => {
     if (designs.length === 0 || isGenerating) return;
@@ -259,6 +299,9 @@ export function TeePublicGenerator({ apiKeys, setShowKeyModal, selectedModel }: 
       return;
     }
 
+    isCancelledRef.current = false;
+    isPausedRef.current = false;
+    setIsPaused(false);
     setIsGenerating(true);
     addToast(`Memulai generate metadata dengan ${aiEngine === 'gemini' ? 'Gemini' : 'Groq'} untuk ${pendingDesigns.length} design...`, 'info');
 
@@ -279,6 +322,15 @@ export function TeePublicGenerator({ apiKeys, setShowKeyModal, selectedModel }: 
     let modelIndex = initialModelIndex;
     
     for (const design of pendingDesigns) {
+      if (isCancelledRef.current) break;
+
+      if (isPausedRef.current) {
+        await new Promise<void>(resolve => {
+          pausePromiseResolveRef.current = resolve;
+        });
+        if (isCancelledRef.current) break;
+      }
+
       setCurrentProcessingId(design.id);
       setSelectedId(design.id);
       
@@ -510,7 +562,7 @@ export function TeePublicGenerator({ apiKeys, setShowKeyModal, selectedModel }: 
         }
       }
 
-      if (!success) {
+      if (!success && !isCancelledRef.current) {
         setDesigns(prev => prev.map(d => 
           d.id === design.id ? { 
             ...d, 
@@ -525,8 +577,12 @@ export function TeePublicGenerator({ apiKeys, setShowKeyModal, selectedModel }: 
     }
 
     setIsGenerating(false);
+    setIsPaused(false);
+    isPausedRef.current = false;
     setCurrentProcessingId(null);
-    addToast('Seluruh antrean metadata selesai dipotong sirkulasi!', 'success');
+    if (!isCancelledRef.current) {
+      addToast('Seluruh antrean metadata selesai diproses!', 'success');
+    }
   };
 
   // Download Bulk TeePublic CSV
@@ -979,28 +1035,56 @@ export function TeePublicGenerator({ apiKeys, setShowKeyModal, selectedModel }: 
                 )}
               </div>
 
-              <button
-                disabled={isGenerating || pendingCount + errorCount === 0}
-                onClick={generateTeePublicMetadata}
-                className={cn(
-                  "w-full py-2.5 px-4 rounded-xl text-xs font-black tracking-wide uppercase flex items-center justify-center gap-2 transition-all border",
-                  isGenerating || pendingCount + errorCount === 0
-                    ? "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed"
-                    : "bg-indigo-600 text-white border-indigo-700 hover:bg-indigo-700 hover:scale-[1.01] shadow-lg shadow-indigo-200"
-                )}
-              >
-                {isGenerating ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin text-white" />
-                    Memproses AI AI_{designs.length - completedCount}...
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="w-4 h-4" />
-                    Generate Metadata AI ({pendingCount + errorCount})
-                  </>
-                )}
-              </button>
+              {isGenerating ? (
+                <div className="flex gap-2">
+                  {isPaused ? (
+                    <button
+                      type="button"
+                      onClick={resumeTeePublicGeneration}
+                      className="flex-1 py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 shadow-md shadow-emerald-200 transition-all active:scale-95"
+                      id="teepublic-resume-btn"
+                    >
+                      <Play className="w-4 h-4 fill-current" />
+                      <span>Lanjutkan</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={pauseTeePublicGeneration}
+                      className="flex-1 py-2.5 px-3 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 shadow-md shadow-amber-200 transition-all active:scale-95"
+                      id="teepublic-pause-btn"
+                    >
+                      <Pause className="w-4 h-4 fill-current" />
+                      <span>Jeda</span>
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={stopTeePublicGeneration}
+                    className="py-2.5 px-3 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all active:scale-95 shadow-sm"
+                    id="teepublic-stop-btn"
+                  >
+                    <Square className="w-4 h-4 fill-current" />
+                    <span>Stop</span>
+                  </button>
+                </div>
+              ) : (
+                <button
+                  disabled={pendingCount + errorCount === 0}
+                  onClick={generateTeePublicMetadata}
+                  className={cn(
+                    "w-full py-2.5 px-4 rounded-xl text-xs font-black tracking-wide uppercase flex items-center justify-center gap-2 transition-all border",
+                    pendingCount + errorCount === 0
+                      ? "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed"
+                      : "bg-indigo-600 text-white border-indigo-700 hover:bg-indigo-700 hover:scale-[1.01] shadow-lg shadow-indigo-200"
+                  )}
+                  id="teepublic-generate-btn"
+                >
+                  <Sparkles className="w-4 h-4" />
+                  Generate Metadata AI ({pendingCount + errorCount})
+                </button>
+              )}
 
               <button
                 disabled={completedCount === 0}

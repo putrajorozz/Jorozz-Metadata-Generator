@@ -9,12 +9,16 @@ import {
   Copy, 
   Loader2, 
   AlertCircle,
-  X 
+  X,
+  ShieldCheck,
+  Zap,
+  CheckCircle2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { cn } from '../lib/utils';
 import { ImageData } from '../types';
+import { calculateSeoScore, sanitizeMicrostockMetadata } from '../lib/metadataUtils';
 
 interface MetadataPanelProps {
   selectedImage: ImageData | undefined;
@@ -54,6 +58,7 @@ interface MetadataPanelProps {
   downloadWithMetadata: (images?: ImageData[]) => void;
   images: ImageData[];
   addToast: (message: string, type?: 'success' | 'error' | 'info') => void;
+  onOptimizeMetadata?: (id: string) => void;
 }
 
 export function MetadataPanel({
@@ -86,9 +91,15 @@ export function MetadataPanel({
   downloadShutterstockCSV,
   downloadWithMetadata,
   images,
-  addToast
+  addToast,
+  onOptimizeMetadata
 }: MetadataPanelProps) {
   const completedImages = images.filter(img => img.status === 'completed' && img.metadata);
+
+  const seoAnalysis = useMemo(() => {
+    if (!selectedImage || !selectedImage.metadata) return null;
+    return calculateSeoScore(selectedImage.metadata, selectedImage.file.type === 'image/png');
+  }, [selectedImage?.metadata, selectedImage?.file?.type]);
 
   // Intelligent Format Recommendation
   const formatRecommendation = (() => {
@@ -320,7 +331,7 @@ export function MetadataPanel({
             {/* Metadata Forms */}
             <div className="space-y-4 pt-4 border-t border-slate-100">
               {/* Model and Key Info */}
-              <div className="p-3 bg-indigo-50 rounded-xl border border-indigo-100 mb-4 flex items-center justify-between">
+              <div className="p-3 bg-indigo-50/80 rounded-xl border border-indigo-100 mb-3 flex items-center justify-between">
                 <p className="text-[10px] text-indigo-800">
                   Model: <strong>{selectedImage.metadata.usedModel}</strong> | Key: <strong>{selectedImage.metadata.usedApiKey}</strong>
                 </p>
@@ -328,6 +339,56 @@ export function MetadataPanel({
                   <span className="text-[8px] font-black bg-indigo-600 text-white px-2 py-0.5 rounded-full uppercase tracking-tighter">AI Analysis Complete</span>
                 )}
               </div>
+
+              {/* SEO Quality Score Card */}
+              {seoAnalysis && (
+                <div className="p-3.5 bg-slate-900 text-white rounded-2xl shadow-md space-y-3 mb-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                      <span className="text-[10px] font-black uppercase tracking-wider text-slate-300">SEO Quality Score</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className={cn(
+                        "text-xs font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider",
+                        seoAnalysis.level === 'excellent' && "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30",
+                        seoAnalysis.level === 'good' && "bg-blue-500/20 text-blue-400 border border-blue-500/30",
+                        seoAnalysis.level === 'average' && "bg-amber-500/20 text-amber-400 border border-amber-500/30",
+                        seoAnalysis.level === 'poor' && "bg-rose-500/20 text-rose-400 border border-rose-500/30"
+                      )}>
+                        {seoAnalysis.score} / 100 • {seoAnalysis.level.toUpperCase()}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-1">
+                    {seoAnalysis.items.map((item, idx) => (
+                      <div key={idx} className="flex items-start gap-1.5 text-[9px] bg-slate-800/80 p-2 rounded-xl border border-slate-700/50">
+                        {item.passed ? (
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                        ) : (
+                          <AlertCircle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                        )}
+                        <div>
+                          <div className="font-bold text-slate-200">{item.label}</div>
+                          <div className="text-slate-400 leading-tight text-[8px] mt-0.5">{item.tip}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {onOptimizeMetadata && (
+                    <button
+                      onClick={() => onOptimizeMetadata(selectedImage.id)}
+                      className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all shadow-sm active:scale-95"
+                      id="btn-auto-optimize-seo"
+                    >
+                      <Zap className="w-3 h-3 text-amber-300 fill-amber-300" />
+                      Auto-Format & Sanitasi SEO Metadata
+                    </button>
+                  )}
+                </div>
+              )}
               
               {viewMode === 'standard' ? (
                 <>

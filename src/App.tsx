@@ -28,11 +28,15 @@ import {
   Image as ImageIcon,
   FileText,
   Layers,
-  MoreVertical
+  MoreVertical,
+  Pause,
+  Play,
+  Square
 } from 'lucide-react';
 import { GoogleGenAI, Type } from "@google/genai";
 import * as piexif from "piexifjs";
 import JSZip from "jszip";
+import { buildMicrostockPrompt, sanitizeMicrostockMetadata } from './lib/metadataUtils';
 import { cn } from './lib/utils';
 
 // Import new components
@@ -52,6 +56,12 @@ export default function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'standard' | 'pngtree'>('standard');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const isPausedRef = useRef(false);
+  const isCancelledRef = useRef(false);
+  const pausePromiseResolveRef = useRef<(() => void) | null>(null);
+  const [elapsedBeforePause, setElapsedBeforePause] = useState<number>(0);
+  const sessionStartTimeRef = useRef<number | null>(null);
   const [progress, setProgress] = useState(0);
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState(MODELS[0].id);
@@ -115,6 +125,20 @@ export default function App() {
     });
   };
 
+  const [autoRetryFailed, setAutoRetryFailed] = useState<boolean>(() => {
+    const saved = localStorage.getItem('auto_retry_failed');
+    return saved !== 'false';
+  });
+
+  const toggleAutoRetryFailed = () => {
+    setAutoRetryFailed(prev => {
+      const next = !prev;
+      localStorage.setItem('auto_retry_failed', JSON.stringify(next));
+      addToast(next ? "Auto-Retry Gambar Gagal: AKTIF" : "Auto-Retry Gambar Gagal: NONAKTIF", next ? "success" : "info");
+      return next;
+    });
+  };
+
   const [audioVolume, setAudioVolume] = useState<number>(() => {
     const saved = localStorage.getItem('audio_volume');
     return saved !== null ? parseFloat(saved) : 0.5;
@@ -159,6 +183,36 @@ export default function App() {
       return next;
     });
   };
+
+  const [styleHint, setStyleHint] = useState<string>(() => localStorage.getItem('style_hint') || '');
+  const [titlePreset, setTitlePreset] = useState<'commercial' | 'minimalist' | 'detailed' | 'ecommerce'>(() => {
+    return (localStorage.getItem('title_preset') as any) || 'commercial';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('style_hint', styleHint);
+  }, [styleHint]);
+
+  useEffect(() => {
+    localStorage.setItem('title_preset', titlePreset);
+  }, [titlePreset]);
+
+  const handleOptimizeMetadata = useCallback((id: string) => {
+    setImages(prev => prev.map(img => {
+      if (img.id === id && img.metadata) {
+        const sanitized = sanitizeMicrostockMetadata(img.metadata, keywordCount);
+        addToast("Metadata berhasil diformat & disanitasi secara SEO", "success");
+        return {
+          ...img,
+          metadata: {
+            ...img.metadata,
+            ...sanitized
+          }
+        };
+      }
+      return img;
+    }));
+  }, [keywordCount]);
 
   const playChime = () => chimeAudio.current?.play().catch(() => {});
   const playSuccess = () => successAudio.current?.play().catch(() => {});
@@ -237,7 +291,7 @@ export default function App() {
 
   useEffect(() => {
     let interval: any;
-    if (isGenerating && startTime) {
+    if (isGenerating && !isPaused && sessionStartTimeRef.current) {
       interval = setInterval(() => {
         setCurrentTime(Date.now());
       }, 10);
@@ -245,7 +299,58 @@ export default function App() {
       clearInterval(interval);
     }
     return () => clearInterval(interval);
-  }, [isGenerating, startTime]);
+  }, [isGenerating, isPaused]);
+
+  const pauseGeneration = () => {
+    if (!isGenerating || isPaused) return;
+    isPausedRef.current = true;
+    setIsPaused(true);
+    const now = Date.now();
+    if (sessionStartTimeRef.current) {
+      setElapsedBeforePause(prev => prev + (now - sessionStartTimeRef.current!));
+      sessionStartTimeRef.current = null;
+    }
+    addToast("⏸️ Proses generate dijeda (Paused)", "info");
+  };
+
+  const resumeGeneration = () => {
+    if (!isGenerating || !isPaused) return;
+    isPausedRef.current = false;
+    setIsPaused(false);
+    sessionStartTimeRef.current = Date.now();
+    setCurrentTime(Date.now());
+    if (pausePromiseResolveRef.current) {
+      pausePromiseResolveRef.current();
+      pausePromiseResolveRef.current = null;
+    }
+    addToast("▶️ Melanjutkan proses generate...", "info");
+  };
+
+  const stopGeneration = () => {
+    if (!isGenerating) return;
+    isCancelledRef.current = true;
+    isPausedRef.current = false;
+    setIsPaused(false);
+    if (pausePromiseResolveRef.current) {
+      pausePromiseResolveRef.current();
+      pausePromiseResolveRef.current = null;
+    }
+
+    const now = Date.now();
+    const extra = sessionStartTimeRef.current ? (now - sessionStartTimeRef.current) : 0;
+    const finalDuration = elapsedBeforePause + extra;
+    setLastGenerationDuration(finalDuration > 0 ? finalDuration : null);
+
+    setIsGenerating(false);
+    setStartTime(null);
+    setCurrentTime(null);
+    setElapsedBeforePause(0);
+    sessionStartTimeRef.current = null;
+    setActiveApiKey(null);
+
+    setImages(prev => prev.map(img => img.status === 'processing' ? { ...img, status: 'pending' } : img));
+    addToast("⏹️ Proses generate dihentikan (Stopped)", "info");
+  };
   
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState<{ 
@@ -520,16 +625,22 @@ export default function App() {
       }
     }
 
+    isCancelledRef.current = false;
+    isPausedRef.current = false;
+    setIsPaused(false);
     setIsGenerating(true);
     setProgress(0);
     setErrorApiKeys([]);
     const batchStartTime = Date.now();
+    sessionStartTimeRef.current = batchStartTime;
     setStartTime(batchStartTime);
     setCurrentTime(batchStartTime);
+    setElapsedBeforePause(0);
     setLastGenerationDuration(null);
 
     const pendingImages = images.filter(img => img.status !== 'completed');
     let completedCount = 0;
+    const failedImageIds: string[] = [];
 
     // Use current successful indices as starting point
     let currentKeyIndex = lastSuccessKeyIndex.current % (aiEngine === 'gemini' ? apiKeys.length : groqKeys.length);
@@ -540,6 +651,19 @@ export default function App() {
     if (groqModelIndex === -1) groqModelIndex = 0;
 
     for (const img of pendingImages) {
+      if (isCancelledRef.current) {
+        break;
+      }
+
+      if (isPausedRef.current) {
+        await new Promise<void>(resolve => {
+          pausePromiseResolveRef.current = resolve;
+        });
+        if (isCancelledRef.current) {
+          break;
+        }
+      }
+
       const imageStartTime = Date.now();
       setSelectedId(img.id);
       setImages(prev => prev.map(i => 
@@ -580,36 +704,13 @@ export default function App() {
               let mimeType = img.file.type || "image/jpeg";
               const isTransparent = img.file.type === 'image/png' || img.file.type === 'image/svg+xml';
               
-              const promptText = `Analyze this image for ALL microstock metadata platforms (Shutterstock, Adobe Stock, PNGTree, Freepik, etc.). 
-                      IMPORTANT: The metadata must be human-like, punchy, and NOT robotic. This is CRITICAL for SEO and sales. 
-                      ${isTransparent ? "IMPORTANT: This image has a TRANSPARENT background (no background). DO NOT mention 'white background', 'isolated on white', or any solid background color in the title, description, or keywords. Use 'transparent background' or 'isolated' if needed. " : ""}
-                      
-                      Generate the following in JSON format:
-                      - title: MANDATORY HUMAN STYLE. A concise yet descriptive, natural title. Start with the main SUBJECT/OBJECT first. 
-                        * RULES: 
-                          1. NO filler words at the start (DO NOT start with "A", "An", "The").
-                          2. NO robotic phrases like "featuring", "of an", "against a", "depicting", "isolated on", "a close up of".
-                          3. Flow: [Object/Main Subject] + [Style/Context].
-                          4. Length: target approximately ${titleLength} characters. If the target length is long (e.g., >80 chars), naturally expand the title by appending descriptive visual details, themes, color combinations, or artistic medium context details at the end of the title so it organically meets the target length without compromising naturalness.
-                      - description: A natural, human-written description (10-20 words). 
-                        * RULES: 
-                          1. NO robotic starting phrases like "This is a photo of", "An image of".
-                          2. Start directly with the subject or action.
-                          3. Be descriptive but natural.
-                      - keywords: Exactly ${keywordCount} SPECIFIC human-like keywords. 
-                        * Priority: Specific visual elements, artistic style (vector, 3d, oil painting, minimalist), mood, and usage context. 
-                        * NO generic robotic fillers. NO duplicates.
-                      - categories: Select exactly 2 most relevant categories from this list: [Abstract, Animals/Wildlife, Arts, Backgrounds/Textures, Beauty/Fashion, Buildings/Landmarks, Business/Finance, Celebrities, Education, Food and drink, Healthcare/Medical, Holidays, Industrial, Interiors, Miscellaneous, Nature, Objects, Parks/Outdoor, People, Religion, Science, Signs/Symbols, Sports/Recreation, Technology, Transportation, Vintage].
-                      - adobeCategory: Select exactly 1 most relevant category from this list: [Animals, Buildings And Architecture, Business, Drinks, The Environment, States of Mind, Food, Graphic Resources, Hobbies and Leisure, Industry, Landscapes, Lifestyle, People, Plants and Flowers, Culture and Religion, Science, Social Issues, Sports, Technology, Transport, Travel].
-                      
-                      Specifically for PNGTree:
-                      - pngTreeMainKeywords: Exactly 3 keywords that are most relevant to the work.
-                      - pngTreeSecondaryKeywords: Exactly 20 unique keywords related to the work (style, color, elements, etc.). IGNORE the general keyword count and always provide exactly 20 for this field.
-                      - pngTreeMainCopy: The primary text information contained in the work, or non-English words related to the image (Indonesian, etc.).
-                      
-                      IMPORTANT CONSTRAINTS:
-                      - DO NOT use the words "oriental", "png", or "download" in any field (title, description, keywords).
-                      - All metadata must be in English unless specified for pngTreeMainCopy.`;
+              const promptText = buildMicrostockPrompt({
+                isTransparent,
+                titleLength,
+                keywordCount,
+                styleHint,
+                titlePreset
+              });
               
               const response = await ai.models.generateContent({
                 model: currentModelId,
@@ -643,23 +744,19 @@ export default function App() {
               }
 
               const result = JSON.parse(response.text);
+              const sanitized = sanitizeMicrostockMetadata(result, keywordCount);
               
               const updatedMetadata = {
-                title: result.title,
-                description: result.description,
-                keywords: result.keywords.slice(0, keywordCount),
-                categories: result.categories.slice(0, 2),
-                adobeCategory: result.adobeCategory,
+                title: sanitized.title,
+                description: sanitized.description,
+                keywords: sanitized.keywords,
+                categories: sanitized.categories,
+                adobeCategory: sanitized.adobeCategory,
                 prompt: promptText,
                 model: currentModelId,
                 usedModel: MODELS[modelIndex].name,
                 usedApiKey: currentKey.slice(-4),
-                pngTree: {
-                  title: result.title,
-                  mainKeywords: result.pngTreeMainKeywords,
-                  secondaryKeywords: result.pngTreeSecondaryKeywords,
-                  mainCopy: result.pngTreeMainCopy
-                }
+                pngTree: sanitized.pngTree
               };
 
               const duration = Date.now() - imageStartTime;
@@ -703,7 +800,6 @@ export default function App() {
         // Outer loop: Groq Models
         while (!success && modelsTried < totalModels) {
           const currentModelId = GROQ_MODELS[groqModelIndex].id;
-          const currentModelName = GROQ_MODELS[groqModelIndex].name;
           let keysTried = 0;
           const totalKeys = groqKeys.length;
 
@@ -724,36 +820,13 @@ export default function App() {
               let mimeType = img.file.type || "image/jpeg";
               const isTransparent = img.file.type === 'image/png' || img.file.type === 'image/svg+xml';
               
-              const promptText = `Analyze this image for ALL microstock metadata platforms (Shutterstock, Adobe Stock, PNGTree, Freepik, etc.). 
-                      IMPORTANT: The metadata must be human-like, punchy, and NOT robotic. This is CRITICAL for SEO and sales. 
-                      ${isTransparent ? "IMPORTANT: This image has a TRANSPARENT background (no background). DO NOT mention 'white background', 'isolated on white', or any solid background color in the title, description, or keywords. Use 'transparent background' or 'isolated' if needed. " : ""}
-                      
-                      Generate the following in JSON format:
-                      - title: MANDATORY HUMAN STYLE. A concise yet descriptive, natural title. Start with the main SUBJECT/OBJECT first. 
-                        * RULES: 
-                          1. NO filler words at the start (DO NOT start with "A", "An", "The").
-                          2. NO robotic phrases like "featuring", "of an", "against a", "depicting", "isolated on", "a close up of".
-                          3. Flow: [Object/Main Subject] + [Style/Context].
-                          4. Length: target approximately ${titleLength} characters. If the target length is long (e.g., >80 chars), naturally expand the title by appending descriptive visual details, themes, color combinations, or artistic medium context details at the end of the title so it organically meets the target length without compromising naturalness.
-                      - description: A natural, human-written description (10-20 words). 
-                        * RULES: 
-                          1. NO robotic starting phrases like "This is a photo of", "An image of".
-                          2. Start directly with the subject or action.
-                          3. Be descriptive but natural.
-                      - keywords: Exactly ${keywordCount} SPECIFIC human-like keywords. 
-                        * Priority: Specific visual elements, artistic style (vector, 3d, oil painting, minimalist), mood, and usage context. 
-                        * NO generic robotic fillers. NO duplicates.
-                      - categories: Select exactly 2 most relevant categories from this list: [Abstract, Animals/Wildlife, Arts, Backgrounds/Textures, Beauty/Fashion, Buildings/Landmarks, Business/Finance, Celebrities, Education, Food and drink, Healthcare/Medical, Holidays, Industrial, Interiors, Miscellaneous, Nature, Objects, Parks/Outdoor, People, Religion, Science, Signs/Symbols, Sports/Recreation, Technology, Transportation, Vintage].
-                      - adobeCategory: Select exactly 1 most relevant category from this list: [Animals, Buildings And Architecture, Business, Drinks, The Environment, States of Mind, Food, Graphic Resources, Hobbies and Leisure, Industry, Landscapes, Lifestyle, People, Plants and Flowers, Culture and Religion, Science, Social Issues, Sports, Technology, Transport, Travel].
-                      
-                      Specifically for PNGTree:
-                      - pngTreeMainKeywords: Exactly 3 keywords that are most relevant to the work.
-                      - pngTreeSecondaryKeywords: Exactly 20 unique keywords related to the work (style, color, elements, etc.). IGNORE the general keyword count and always provide exactly 20 for this field.
-                      - pngTreeMainCopy: The primary text information contained in the work, or non-English words related to the image (Indonesian, etc.).
-                      
-                      IMPORTANT CONSTRAINTS:
-                      - DO NOT use the words "oriental", "png", or "download" in any field (title, description, keywords).
-                      - All metadata must be in English unless specified for pngTreeMainCopy.`;
+              const promptText = buildMicrostockPrompt({
+                isTransparent,
+                titleLength,
+                keywordCount,
+                styleHint,
+                titlePreset
+              });
 
               const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
                 method: "POST",
@@ -798,13 +871,14 @@ export default function App() {
               }
 
               const result = JSON.parse(resultText);
+              const sanitized = sanitizeMicrostockMetadata(result, keywordCount);
 
               const updatedMetadata = {
-                title: result.title || "",
-                description: result.description || "",
-                keywords: Array.isArray(result.keywords) ? result.keywords.slice(0, keywordCount) : [],
-                categories: Array.isArray(result.categories) ? result.categories.slice(0, 2) : [],
-                adobeCategory: result.adobeCategory || "",
+                title: sanitized.title,
+                description: sanitized.description,
+                keywords: sanitized.keywords,
+                categories: sanitized.categories,
+                adobeCategory: sanitized.adobeCategory,
                 prompt: promptText,
                 model: currentModelId,
                 usedModel: "Groq " + (
@@ -813,12 +887,7 @@ export default function App() {
                   currentModelId.includes("90b") ? "90B" : "11B"
                 ),
                 usedApiKey: activeKey.slice(-4),
-                pngTree: {
-                  title: result.title || "",
-                  mainKeywords: Array.isArray(result.pngTreeMainKeywords) ? result.pngTreeMainKeywords : [],
-                  secondaryKeywords: Array.isArray(result.pngTreeSecondaryKeywords) ? result.pngTreeSecondaryKeywords : [],
-                  mainCopy: result.pngTreeMainCopy || ""
-                }
+                pngTree: sanitized.pngTree
               };
 
               const duration = Date.now() - imageStartTime;
@@ -851,6 +920,7 @@ export default function App() {
       }
 
       if (!success) {
+        failedImageIds.push(img.id);
         setImages(prev => prev.map(i => 
           i.id === img.id ? { ...i, status: 'error', error: lastErrorMessage } : i
         ));
@@ -861,30 +931,316 @@ export default function App() {
       setProgress((completedCount / pendingImages.length) * 100);
     }
 
+    // Auto-Retry background pass if enabled and there are failed images
+    if (!isCancelledRef.current && autoRetryFailed && failedImageIds.length > 0) {
+      addToast(`⚡ Auto-Retry: Menjalankan percobaan ulang untuk ${failedImageIds.length} gambar yang gagal...`, "info");
+      const recoveredCount = await processAutoRetryBatch(failedImageIds);
+      if (recoveredCount > 0) {
+        addToast(`🎉 Auto-Retry Selesai! ${recoveredCount} dari ${failedImageIds.length} gambar berhasil dipulihkan.`, "success");
+      }
+    }
+
+    const now = Date.now();
+    const extra = sessionStartTimeRef.current ? (now - sessionStartTimeRef.current) : 0;
+    const finalDuration = elapsedBeforePause + extra;
+
     setIsGenerating(false);
-    setLastGenerationDuration(Date.now() - batchStartTime);
+    setIsPaused(false);
+    isPausedRef.current = false;
+    setLastGenerationDuration(finalDuration > 0 ? finalDuration : null);
     setStartTime(null);
     setCurrentTime(null);
+    setElapsedBeforePause(0);
+    sessionStartTimeRef.current = null;
     setActiveApiKey(null);
     
-    // Check if we just finished the batch
-    addToast("Semua gambar berhasil diproses!", "success");
-    playComplete(); 
-    
-    // Auto scroll with robust calculation and 800ms delay to ensure layout is settled
-    setTimeout(() => {
-      if (downloadHubRef.current) {
-        const elementRect = downloadHubRef.current.getBoundingClientRect();
-        const absoluteElementTop = elementRect.top + window.pageYOffset;
-        // Offset for the fixed header (roughly 80-100px)
-        const scrollToY = absoluteElementTop - 120;
-        
-        window.scrollTo({
-          top: scrollToY,
-          behavior: 'smooth'
+    if (!isCancelledRef.current) {
+      // Check if we just finished the batch
+      addToast("Semua gambar berhasil diproses!", "success");
+      playComplete(); 
+      
+      // Auto scroll with robust calculation and 800ms delay to ensure layout is settled
+      setTimeout(() => {
+        if (downloadHubRef.current) {
+          const elementRect = downloadHubRef.current.getBoundingClientRect();
+          const absoluteElementTop = elementRect.top + window.pageYOffset;
+          const scrollToY = absoluteElementTop - 120;
+          
+          window.scrollTo({
+            top: scrollToY,
+            behavior: 'smooth'
+          });
+        }
+      }, 800);
+    }
+  };
+
+  const processAutoRetryBatch = async (failedIds: string[]): Promise<number> => {
+    if (failedIds.length === 0) return 0;
+
+    const activeKeys = aiEngine === 'gemini' ? apiKeys : groqKeys;
+    if (activeKeys.length === 0) return 0;
+
+    let recoveredCount = 0;
+
+    for (let i = 0; i < failedIds.length; i++) {
+      if (isCancelledRef.current) break;
+
+      if (isPausedRef.current) {
+        await new Promise<void>(resolve => {
+          pausePromiseResolveRef.current = resolve;
         });
+        if (isCancelledRef.current) break;
       }
-    }, 800);
+
+      const id = failedIds[i];
+
+      let currentImg: ImageData | undefined;
+      setImages(prev => {
+        currentImg = prev.find(item => item.id === id);
+        if (currentImg) {
+          return prev.map(item => item.id === id ? { ...item, status: 'processing', error: undefined } : item);
+        }
+        return prev;
+      });
+
+      if (!currentImg) continue;
+      setSelectedId(id);
+
+      const imageStartTime = Date.now();
+      let success = false;
+      let lastErrorMessage = "Auto-retry gagal pada semua API key";
+
+      if (aiEngine === 'gemini') {
+        const totalKeys = apiKeys.length;
+        let keysTried = 0;
+        let startKeyIdx = (lastSuccessKeyIndex.current + 1) % totalKeys;
+        let modelIndex = autoRotateModel ? (lastSuccessModelIndex.current % MODELS.length) : MODELS.findIndex(m => m.id === selectedModel);
+        if (modelIndex === -1) modelIndex = 0;
+        const currentModelId = MODELS[modelIndex].id;
+
+        while (!success && keysTried < totalKeys) {
+          const actualKeyIndex = (startKeyIdx + keysTried) % totalKeys;
+          const currentKey = apiKeys[actualKeyIndex];
+          setActiveApiKey(currentKey);
+
+          try {
+            const ai = new GoogleGenAI({ apiKey: currentKey });
+            const reader = new FileReader();
+            const base64Data = await new Promise<string>((resolve, reject) => {
+              reader.onload = () => resolve((reader.result as string).split(",")[1]);
+              reader.onerror = () => reject(new Error("Gagal membaca file gambar"));
+              reader.readAsDataURL(currentImg!.file);
+            });
+
+            let mimeType = currentImg!.file.type || "image/jpeg";
+            const isTransparent = currentImg!.file.type === 'image/png' || currentImg!.file.type === 'image/svg+xml';
+            const promptText = buildMicrostockPrompt({ isTransparent, titleLength, keywordCount, styleHint, titlePreset });
+
+            const response = await ai.models.generateContent({
+              model: currentModelId,
+              contents: {
+                parts: [
+                  { inlineData: { mimeType, data: base64Data } },
+                  { text: promptText },
+                ],
+              },
+              config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                  type: Type.OBJECT,
+                  properties: {
+                    title: { type: Type.STRING },
+                    description: { type: Type.STRING },
+                    keywords: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    categories: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    adobeCategory: { type: Type.STRING },
+                    pngTreeMainKeywords: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    pngTreeSecondaryKeywords: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    pngTreeMainCopy: { type: Type.STRING }
+                  },
+                  required: ["title", "description", "keywords", "categories", "adobeCategory", "pngTreeMainKeywords", "pngTreeSecondaryKeywords", "pngTreeMainCopy"]
+                }
+              }
+            });
+
+            if (!response.text) throw new Error("Empty response from Gemini API");
+            const result = JSON.parse(response.text);
+            const sanitized = sanitizeMicrostockMetadata(result, keywordCount);
+
+            const updatedMetadata = {
+              title: sanitized.title,
+              description: sanitized.description,
+              keywords: sanitized.keywords,
+              categories: sanitized.categories,
+              adobeCategory: sanitized.adobeCategory,
+              prompt: promptText,
+              model: currentModelId,
+              usedModel: MODELS[modelIndex].name,
+              usedApiKey: currentKey.slice(-4),
+              pngTree: sanitized.pngTree
+            };
+
+            const duration = Date.now() - imageStartTime;
+            setImages(prev => prev.map(item => item.id === id ? { ...item, status: 'completed', metadata: updatedMetadata, processingTime: duration } : item));
+            success = true;
+            recoveredCount++;
+            lastSuccessKeyIndex.current = actualKeyIndex;
+            addToast(`✨ Auto-Retry Dipulihkan: ${currentImg!.file.name}`, "success");
+            playChime();
+          } catch (err: any) {
+            console.error(`Auto-Retry Gemini key error (${actualKeyIndex}):`, err);
+            lastErrorMessage = getErrorMessage(err);
+            setErrorApiKeys(prev => [...new Set([...prev, currentKey])]);
+            keysTried++;
+          }
+        }
+      } else {
+        const totalKeys = groqKeys.length;
+        let keysTried = 0;
+        let startKeyIdx = (lastSuccessKeyIndex.current + 1) % totalKeys;
+        let groqModelIndex = autoRotateGroqModel ? (lastSuccessGroqModelIndex.current % GROQ_MODELS.length) : GROQ_MODELS.findIndex(m => m.id === selectedGroqModel);
+        if (groqModelIndex === -1) groqModelIndex = 0;
+        const currentModelId = GROQ_MODELS[groqModelIndex].id;
+
+        while (!success && keysTried < totalKeys) {
+          const actualKeyIndex = (startKeyIdx + keysTried) % totalKeys;
+          const activeKey = groqKeys[actualKeyIndex];
+          setActiveApiKey(activeKey);
+
+          try {
+            const reader = new FileReader();
+            const base64Data = await new Promise<string>((resolve, reject) => {
+              reader.onload = () => resolve((reader.result as string).split(",")[1]);
+              reader.onerror = () => reject(new Error("Gagal membaca file gambar"));
+              reader.readAsDataURL(currentImg!.file);
+            });
+
+            let mimeType = currentImg!.file.type || "image/jpeg";
+            const isTransparent = currentImg!.file.type === 'image/png' || currentImg!.file.type === 'image/svg+xml';
+            const promptText = buildMicrostockPrompt({ isTransparent, titleLength, keywordCount, styleHint, titlePreset });
+
+            const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+              method: "POST",
+              headers: {
+                "Authorization": `Bearer ${activeKey}`,
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({
+                model: currentModelId,
+                messages: [
+                  {
+                    role: "user",
+                    content: [
+                      {
+                        type: "text",
+                        text: promptText + "\nRemember: return raw JSON object."
+                      },
+                      {
+                        type: "image_url",
+                        image_url: { url: `data:${mimeType};base64,${base64Data}` }
+                      }
+                    ]
+                  }
+                ],
+                response_format: { type: "json_object" },
+                temperature: 0.2
+              })
+            });
+
+            if (!response.ok) {
+              const errBody = await response.json().catch(() => ({}));
+              throw new Error(errBody.error?.message || `HTTP ${response.status}`);
+            }
+
+            const responseData = await response.json();
+            let resultText = responseData.choices?.[0]?.message?.content?.trim() || '{}';
+            if (resultText.startsWith('```')) {
+              resultText = resultText.replace(/^```(?:json)?\n?|```$/g, '').trim();
+            }
+
+            const result = JSON.parse(resultText);
+            const sanitized = sanitizeMicrostockMetadata(result, keywordCount);
+
+            const updatedMetadata = {
+              title: sanitized.title,
+              description: sanitized.description,
+              keywords: sanitized.keywords,
+              categories: sanitized.categories,
+              adobeCategory: sanitized.adobeCategory,
+              prompt: promptText,
+              model: currentModelId,
+              usedModel: "Groq " + (
+                currentModelId.includes("llama-4-scout") ? "Llama 4 Scout" :
+                currentModelId.includes("llama-4-maverick") ? "Llama 4 Maverick" :
+                currentModelId.includes("90b") ? "90B" : "11B"
+              ),
+              usedApiKey: activeKey.slice(-4),
+              pngTree: sanitized.pngTree
+            };
+
+            const duration = Date.now() - imageStartTime;
+            setImages(prev => prev.map(item => item.id === id ? { ...item, status: 'completed', metadata: updatedMetadata, processingTime: duration } : item));
+            success = true;
+            recoveredCount++;
+            lastSuccessKeyIndex.current = actualKeyIndex;
+            addToast(`✨ Auto-Retry Dipulihkan: ${currentImg!.file.name}`, "success");
+            playChime();
+          } catch (err: any) {
+            console.error(`Auto-Retry Groq key error (${actualKeyIndex}):`, err);
+            lastErrorMessage = err.message || err;
+            keysTried++;
+          }
+        }
+      }
+
+      if (!success) {
+        setImages(prev => prev.map(item => item.id === id ? { ...item, status: 'error', error: lastErrorMessage } : item));
+      }
+    }
+
+    return recoveredCount;
+  };
+
+  const handleManualAutoRetry = async () => {
+    const failedIds = images.filter(i => i.status === 'error').map(i => i.id);
+    if (failedIds.length === 0) {
+      addToast("Tidak ada gambar yang gagal untuk di-retry", "info");
+      return;
+    }
+    if (isGenerating) return;
+
+    isCancelledRef.current = false;
+    isPausedRef.current = false;
+    setIsPaused(false);
+    setIsGenerating(true);
+    const batchStartTime = Date.now();
+    sessionStartTimeRef.current = batchStartTime;
+    setStartTime(batchStartTime);
+    setCurrentTime(batchStartTime);
+    setElapsedBeforePause(0);
+
+    const recovered = await processAutoRetryBatch(failedIds);
+
+    const now = Date.now();
+    const extra = sessionStartTimeRef.current ? (now - sessionStartTimeRef.current) : 0;
+    const finalDuration = elapsedBeforePause + extra;
+
+    if (recovered > 0) {
+      addToast(`🎉 Auto-Retry Selesai! ${recovered} dari ${failedIds.length} gambar berhasil dipulihkan.`, "success");
+    } else if (!isCancelledRef.current) {
+      addToast("Auto-Retry selesai. Semua API key telah dicoba.", "info");
+    }
+
+    setIsGenerating(false);
+    setIsPaused(false);
+    isPausedRef.current = false;
+    setLastGenerationDuration(finalDuration > 0 ? finalDuration : null);
+    setStartTime(null);
+    setCurrentTime(null);
+    setElapsedBeforePause(0);
+    sessionStartTimeRef.current = null;
+    setActiveApiKey(null);
   };
 
   const regenerateSingleMetadata = async (id: string) => {
@@ -953,36 +1309,13 @@ export default function App() {
             let mimeType = img.file.type || "image/jpeg";
             const isTransparent = img.file.type === 'image/png' || img.file.type === 'image/svg+xml';
             
-            const promptText = `Analyze this image for ALL microstock metadata platforms (Shutterstock, Adobe Stock, PNGTree, Freepik, etc.). 
-                    IMPORTANT: The metadata must be human-like, punchy, and NOT robotic. This is CRITICAL for SEO and sales. 
-                    ${isTransparent ? "IMPORTANT: This image has a TRANSPARENT background (no background). DO NOT mention 'white background', 'isolated on white', or any solid background color in the title, description, or keywords. Use 'transparent background' or 'isolated' if needed. " : ""}
-                    
-                    Generate the following in JSON format:
-                    - title: MANDATORY HUMAN STYLE. A concise yet descriptive, natural title. Start with the main SUBJECT/OBJECT first. 
-                      * RULES: 
-                        1. NO filler words at the start (DO NOT start with "A", "An", "The").
-                        2. NO robotic phrases like "featuring", "of an", "against a", "depicting", "isolated on", "a close up of".
-                        3. Flow: [Object/Main Subject] + [Style/Context].
-                        4. Length: target approximately ${titleLength} characters. If the target length is long (e.g., >80 chars), naturally expand the title by appending descriptive visual details, themes, color combinations, or artistic medium context details at the end of the title so it organically meets the target length without compromising naturalness.
-                    - description: A natural, human-written description (10-20 words). 
-                      * RULES: 
-                        1. NO robotic starting phrases like "This is a photo of", "An image of".
-                        2. Start directly with the subject or action.
-                        3. Be descriptive but natural.
-                    - keywords: Exactly ${keywordCount} SPECIFIC human-like keywords. 
-                      * Priority: Specific visual elements, artistic style (vector, 3d, oil painting, minimalist), mood, and usage context. 
-                      * NO generic robotic fillers. NO duplicates.
-                    - categories: Select exactly 2 most relevant categories from this list: [Abstract, Animals/Wildlife, Arts, Backgrounds/Textures, Beauty/Fashion, Buildings/Landmarks, Business/Finance, Celebrities, Education, Food and drink, Healthcare/Medical, Holidays, Industrial, Interiors, Miscellaneous, Nature, Objects, Parks/Outdoor, People, Religion, Science, Signs/Symbols, Sports/Recreation, Technology, Transportation, Vintage].
-                    - adobeCategory: Select exactly 1 most relevant category from this list: [Animals, Buildings And Architecture, Business, Drinks, The Environment, States of Mind, Food, Graphic Resources, Hobbies and Leisure, Industry, Landscapes, Lifestyle, People, Plants and Flowers, Culture and Religion, Science, Social Issues, Sports, Technology, Transport, Travel].
-                    
-                    Specifically for PNGTree:
-                    - pngTreeMainKeywords: Exactly 3 keywords that are most relevant to the work.
-                    - pngTreeSecondaryKeywords: Exactly 20 unique keywords related to the work (style, color, elements, etc.). IGNORE the general keyword count and always provide exactly 20 for this field.
-                    - pngTreeMainCopy: The primary text information contained in the work, or non-English words related to the image (Indonesian, etc.).
-                    
-                    IMPORTANT CONSTRAINTS:
-                    - DO NOT use the words "oriental", "png", or "download" in any field (title, description, keywords).
-                    - All metadata must be in English unless specified for pngTreeMainCopy.`;
+            const promptText = buildMicrostockPrompt({
+              isTransparent,
+              titleLength,
+              keywordCount,
+              styleHint,
+              titlePreset
+            });
             
             const response = await ai.models.generateContent({
               model: currentModelId,
@@ -1016,23 +1349,19 @@ export default function App() {
             }
 
             const result = JSON.parse(response.text);
+            const sanitized = sanitizeMicrostockMetadata(result, keywordCount);
 
             const updatedMetadata = {
-              title: result.title,
-              description: result.description,
-              keywords: result.keywords.slice(0, keywordCount),
-              categories: result.categories.slice(0, 2),
-              adobeCategory: result.adobeCategory,
+              title: sanitized.title,
+              description: sanitized.description,
+              keywords: sanitized.keywords,
+              categories: sanitized.categories,
+              adobeCategory: sanitized.adobeCategory,
               prompt: promptText,
               model: currentModelId,
               usedModel: MODELS[modelIndex].name,
               usedApiKey: currentKey.slice(-4),
-              pngTree: {
-                title: result.title,
-                mainKeywords: result.pngTreeMainKeywords,
-                secondaryKeywords: result.pngTreeSecondaryKeywords,
-                mainCopy: result.pngTreeMainCopy
-              }
+              pngTree: sanitized.pngTree
             };
 
             const duration = Date.now() - imageStartTime;
@@ -1092,36 +1421,13 @@ export default function App() {
             let mimeType = img.file.type || "image/jpeg";
             const isTransparent = img.file.type === 'image/png' || img.file.type === 'image/svg+xml';
             
-            const promptText = `Analyze this image for ALL microstock metadata platforms (Shutterstock, Adobe Stock, PNGTree, Freepik, etc.). 
-                    IMPORTANT: The metadata must be human-like, punchy, and NOT robotic. This is CRITICAL for SEO and sales. 
-                    ${isTransparent ? "IMPORTANT: This image has a TRANSPARENT background (no background). DO NOT mention 'white background', 'isolated on white', or any solid background color in the title, description, or keywords. Use 'transparent background' or 'isolated' if needed. " : ""}
-                    
-                    Generate the following in JSON format:
-                    - title: MANDATORY HUMAN STYLE. A concise yet descriptive, natural title. Start with the main SUBJECT/OBJECT first. 
-                      * RULES: 
-                        1. NO filler words at the start (DO NOT start with "A", "An", "The").
-                        2. NO robotic phrases like "featuring", "of an", "against a", "depicting", "isolated on", "a close up of".
-                        3. Flow: [Object/Main Subject] + [Style/Context].
-                        4. Length: target approximately ${titleLength} characters. If the target length is long (e.g., >80 chars), naturally expand the title by appending descriptive visual details, themes, color combinations, or artistic medium context details at the end of the title so it organically meets the target length without compromising naturalness.
-                    - description: A natural, human-written description (10-20 words). 
-                      * RULES: 
-                        1. NO robotic starting phrases like "This is a photo of", "An image of".
-                        2. Start directly with the subject or action.
-                        3. Be descriptive but natural.
-                    - keywords: Exactly ${keywordCount} SPECIFIC human-like keywords. 
-                      * Priority: Specific visual elements, artistic style (vector, 3d, oil painting, minimalist), mood, and usage context. 
-                      * NO generic robotic fillers. NO duplicates.
-                    - categories: Select exactly 2 most relevant categories from this list: [Abstract, Animals/Wildlife, Arts, Backgrounds/Textures, Beauty/Fashion, Buildings/Landmarks, Business/Finance, Celebrities, Education, Food and drink, Healthcare/Medical, Holidays, Industrial, Interiors, Miscellaneous, Nature, Objects, Parks/Outdoor, People, Religion, Science, Signs/Symbols, Sports/Recreation, Technology, Transportation, Vintage].
-                    - adobeCategory: Select exactly 1 most relevant category from this list: [Animals, Buildings And Architecture, Business, Drinks, The Environment, States of Mind, Food, Graphic Resources, Hobbies and Leisure, Industry, Landscapes, Lifestyle, People, Plants and Flowers, Culture and Religion, Science, Social Issues, Sports, Technology, Transport, Travel].
-                    
-                    Specifically for PNGTree:
-                    - pngTreeMainKeywords: Exactly 3 keywords that are most relevant to the work.
-                    - pngTreeSecondaryKeywords: Exactly 20 unique keywords related to the work (style, color, elements, etc.). IGNORE the general keyword count and always provide exactly 20 for this field.
-                    - pngTreeMainCopy: The primary text information contained in the work, or non-English words related to the image (Indonesian, etc.).
-                    
-                    IMPORTANT CONSTRAINTS:
-                    - DO NOT use the words "oriental", "png", or "download" in any field (title, description, keywords).
-                    - All metadata must be in English unless specified for pngTreeMainCopy.`;
+            const promptText = buildMicrostockPrompt({
+              isTransparent,
+              titleLength,
+              keywordCount,
+              styleHint,
+              titlePreset
+            });
 
             const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
               method: "POST",
@@ -1154,8 +1460,7 @@ export default function App() {
             });
 
             if (!response.ok) {
-              const errBody = await response.json().catch(() => ({}));
-              throw new Error(errBody.error?.message || `HTTP ${response.status}`);
+              throw new Error(await response.json().catch(() => ({})).then(b => b.error?.message || `HTTP ${response.status}`));
             }
 
             const responseData = await response.json();
@@ -1166,13 +1471,14 @@ export default function App() {
             }
 
             const result = JSON.parse(resultText);
+            const sanitized = sanitizeMicrostockMetadata(result, keywordCount);
 
             const updatedMetadata = {
-              title: result.title || "",
-              description: result.description || "",
-              keywords: Array.isArray(result.keywords) ? result.keywords.slice(0, keywordCount) : [],
-              categories: Array.isArray(result.categories) ? result.categories.slice(0, 2) : [],
-              adobeCategory: result.adobeCategory || "",
+              title: sanitized.title,
+              description: sanitized.description,
+              keywords: sanitized.keywords,
+              categories: sanitized.categories,
+              adobeCategory: sanitized.adobeCategory,
               prompt: promptText,
               model: currentModelId,
               usedModel: "Groq " + (
@@ -1181,12 +1487,7 @@ export default function App() {
                 currentModelId.includes("90b") ? "90B" : "11B"
               ),
               usedApiKey: activeKey.slice(-4),
-              pngTree: {
-                title: result.title || "",
-                mainKeywords: Array.isArray(result.pngTreeMainKeywords) ? result.pngTreeMainKeywords : [],
-                secondaryKeywords: Array.isArray(result.pngTreeSecondaryKeywords) ? result.pngTreeSecondaryKeywords : [],
-                mainCopy: result.pngTreeMainCopy || ""
-              }
+              pngTree: sanitized.pngTree
             };
 
             const duration = Date.now() - imageStartTime;
@@ -1645,16 +1946,69 @@ export default function App() {
                 initial={{ opacity: 0, y: -20 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -20 }}
-                className="absolute top-0 left-0 right-0 z-20 p-4 bg-white/80 backdrop-blur-md border-b border-slate-200"
+                className={cn(
+                  "absolute top-0 left-0 right-0 z-30 p-3 sm:p-4 backdrop-blur-md border-b transition-colors shadow-sm",
+                  isPaused ? "bg-amber-50/95 border-amber-200 text-amber-900" : "bg-white/90 border-slate-200"
+                )}
               >
-                <div className="max-w-3xl mx-auto">
-                  <div className="flex justify-between text-xs mb-2 text-indigo-600 font-medium">
-                    <span>Processing Images...</span>
-                    <span>{Math.round(progress)}%</span>
+                <div className="max-w-3xl mx-auto flex flex-col gap-2">
+                  <div className="flex justify-between items-center text-xs">
+                    <div className="flex items-center gap-2">
+                      {isPaused ? (
+                        <span className="flex items-center gap-1.5 font-bold text-amber-800">
+                          <Pause className="w-3.5 h-3.5 fill-current" />
+                          Proses Dijeda
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1.5 font-bold text-indigo-600">
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          Memproses Gambar...
+                        </span>
+                      )}
+                      <span className="text-slate-300 font-normal">|</span>
+                      <span className="font-mono text-slate-600 font-bold">
+                        {Math.round(progress)}%
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {isPaused ? (
+                        <button
+                          type="button"
+                          onClick={resumeGeneration}
+                          className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-black uppercase tracking-wider flex items-center gap-1 shadow-sm transition-all active:scale-95"
+                          id="topbar-resume-btn"
+                        >
+                          <Play className="w-3 h-3 fill-current" />
+                          <span>Lanjutkan</span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={pauseGeneration}
+                          className="px-3 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-[10px] font-black uppercase tracking-wider flex items-center gap-1 shadow-sm transition-all active:scale-95"
+                          id="topbar-pause-btn"
+                        >
+                          <Pause className="w-3 h-3 fill-current" />
+                          <span>Jeda</span>
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={stopGeneration}
+                        className="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg text-[10px] font-black uppercase tracking-wider flex items-center gap-1 transition-all active:scale-95"
+                        id="topbar-stop-btn"
+                      >
+                        <Square className="w-3 h-3 fill-current" />
+                        <span>Stop</span>
+                      </button>
+                    </div>
                   </div>
+
                   <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
                     <motion.div 
-                      className="h-full bg-indigo-500"
+                      className={cn("h-full", isPaused ? "bg-amber-500" : "bg-indigo-500")}
                       initial={{ width: 0 }}
                       animate={{ width: `${progress}%` }}
                     />
@@ -1731,10 +2085,19 @@ export default function App() {
                     setTitleLength={setTitleLength}
                     keywordCount={keywordCount}
                     setKeywordCount={setKeywordCount}
+                    titlePreset={titlePreset}
+                    setTitlePreset={setTitlePreset}
+                    styleHint={styleHint}
+                    setStyleHint={setStyleHint}
                     generateMetadata={generateMetadata}
                     isGenerating={isGenerating}
-                    startTime={startTime}
+                    isPaused={isPaused}
+                    pauseGeneration={pauseGeneration}
+                    resumeGeneration={resumeGeneration}
+                    stopGeneration={stopGeneration}
+                    startTime={sessionStartTimeRef.current}
                     currentTime={currentTime}
+                    elapsedBeforePause={elapsedBeforePause}
                     lastGenerationDuration={lastGenerationDuration}
                     aiEngine={aiEngine}
                     setAiEngine={setAiEngine}
@@ -1749,6 +2112,9 @@ export default function App() {
                     toggleAutoRotateModel={toggleAutoRotateModel}
                     autoRotateGroqModel={autoRotateGroqModel}
                     toggleAutoRotateGroqModel={toggleAutoRotateGroqModel}
+                    autoRetryFailed={autoRetryFailed}
+                    toggleAutoRetryFailed={toggleAutoRetryFailed}
+                    onManualAutoRetry={handleManualAutoRetry}
                   />
                 </div>
 
@@ -1760,6 +2126,7 @@ export default function App() {
                     <BatchDownloadHub 
                       images={images}
                       isGenerating={isGenerating}
+                      isPaused={isPaused}
                       exportExtension={exportExtension}
                       setExportExtension={setExportExtension}
                       isGenerativeAI={isGenerativeAI}
@@ -1811,6 +2178,7 @@ export default function App() {
                       downloadWithMetadata={downloadWithMetadata}
                       images={images}
                       addToast={addToast}
+                      onOptimizeMetadata={handleOptimizeMetadata}
                     />
                   </div>
                 </div>

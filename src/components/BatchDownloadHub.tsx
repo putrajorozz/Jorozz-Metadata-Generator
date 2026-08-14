@@ -12,6 +12,7 @@ import { ImageData } from '../types';
 interface BatchDownloadHubProps {
   images: ImageData[];
   isGenerating: boolean;
+  isPaused?: boolean;
   exportExtension: string;
   setExportExtension: (ext: any) => void;
   isGenerativeAI: boolean;
@@ -30,6 +31,7 @@ interface BatchDownloadHubProps {
 export function BatchDownloadHub({
   images,
   isGenerating,
+  isPaused = false,
   exportExtension,
   setExportExtension,
   isGenerativeAI,
@@ -45,6 +47,7 @@ export function BatchDownloadHub({
   viewMode
 }: BatchDownloadHubProps) {
   const completedImages = images.filter(img => img.status === 'completed' && img.metadata);
+  const isBusy = isGenerating && !isPaused;
 
   // Intelligent Format Recommendation
   const formatRecommendation = (() => {
@@ -72,8 +75,11 @@ export function BatchDownloadHub({
           <Download className="w-3.5 h-3.5 text-indigo-600" />
           <h3 className="text-[10px] font-black text-indigo-700 uppercase tracking-widest">Batch Download Hub</h3>
         </div>
-        <span className="px-2 py-0.5 bg-indigo-600 text-white rounded-full text-[8px] font-black">
-          {completedImages.length} READY
+        <span className={cn(
+          "px-2 py-0.5 text-white rounded-full text-[8px] font-black tracking-wider transition-colors",
+          isPaused ? "bg-amber-600 animate-pulse" : "bg-indigo-600"
+        )}>
+          {completedImages.length} READY {isPaused && "• PAUSED"}
         </span>
       </div>
       
@@ -100,10 +106,10 @@ export function BatchDownloadHub({
                           else setActivePlatform(p.label as any);
                         }
                       }}
-                      disabled={isGenerating}
+                      disabled={isBusy}
                       className={cn(
                         "w-full relative flex flex-col items-center gap-2 p-3 rounded-2xl border transition-all group",
-                        isGenerating 
+                        isBusy 
                           ? "opacity-40 cursor-not-allowed grayscale" 
                           : cn(
                               "bg-white border-slate-200 hover:border-slate-300 hover:shadow-md active:scale-95 shadow-sm",
@@ -229,9 +235,14 @@ export function BatchDownloadHub({
               })}
             </div>
             </div>
-            {isGenerating && (
+            {isGenerating && !isPaused && (
               <p className="text-[9px] text-center text-slate-400 font-medium animate-pulse mt-3">
                 Tunggu proses generate selesai untuk mendownload...
+              </p>
+            )}
+            {isPaused && completedImages.length > 0 && (
+              <p className="text-[9px] text-center text-amber-700 font-bold mt-3 bg-amber-50 py-1.5 px-3 rounded-xl border border-amber-200">
+                ⏸️ Mode Jeda Aktif: Anda dapat mendownload {completedImages.length} file yang sudah selesai.
               </p>
             )}
           </>
