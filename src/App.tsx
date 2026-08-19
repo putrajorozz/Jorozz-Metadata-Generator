@@ -31,7 +31,8 @@ import {
   MoreVertical,
   Pause,
   Play,
-  Square
+  Square,
+  AlertTriangle
 } from 'lucide-react';
 import { GoogleGenAI, Type } from "@google/genai";
 import * as piexif from "piexifjs";
@@ -44,12 +45,11 @@ import { TopHeader } from './components/TopHeader';
 import { AssetGrid } from './components/AssetGrid';
 import { MetadataPanel } from './components/MetadataPanel';
 import { BatchDownloadHub } from './components/BatchDownloadHub';
-import { EpsMetadataInjector } from './components/EpsMetadataInjector';
-import { TeePublicGenerator } from './components/TeePublicGenerator';
+import { categorizeApiError, maskApiKey } from './lib/errorDiagnostics';
 
 // Import constants and types
 import { MODELS, CHANGELOG_DATA, GROQ_MODELS } from './constants';
-import { ImageData, PngTreeMetadata, Toast } from './types';
+import { ImageData, PngTreeMetadata, Toast, ErrorDiagnostic } from './types';
 
 export default function App() {
   const [images, setImages] = useState<ImageData[]>([]);
@@ -287,7 +287,10 @@ export default function App() {
   const [startTime, setStartTime] = useState<number | null>(null);
   const [currentTime, setCurrentTime] = useState<number | null>(null);
   const [lastGenerationDuration, setLastGenerationDuration] = useState<number | null>(null);
-  const [currentPage, setCurrentPage] = useState<'generator' | 'injector' | 'teepublic'>('generator');
+  const [activeModelDisplay, setActiveModelDisplay] = useState<string>('');
+  const [activeKeyDisplay, setActiveKeyDisplay] = useState<string>('');
+  const [currentStatusDetail, setCurrentStatusDetail] = useState<string>('');
+  const [lastRotationWarning, setLastRotationWarning] = useState<{ message: string; type: string } | null>(null);
 
   useEffect(() => {
     let interval: any;
@@ -342,6 +345,10 @@ export default function App() {
     setLastGenerationDuration(finalDuration > 0 ? finalDuration : null);
 
     setIsGenerating(false);
+    setActiveModelDisplay('');
+    setActiveKeyDisplay('');
+    setCurrentStatusDetail('');
+    setLastRotationWarning(null);
     setStartTime(null);
     setCurrentTime(null);
     setElapsedBeforePause(0);
@@ -666,12 +673,10 @@ export default function App() {
 
       const imageStartTime = Date.now();
       setSelectedId(img.id);
-      setImages(prev => prev.map(i => 
-        i.id === img.id ? { ...i, status: 'processing' } : i
-      ));
 
       let success = false;
       let lastErrorMessage = "Semua API Key dan Model gagal atau kuota habis";
+      let lastDiagnostic: ErrorDiagnostic | undefined;
 
       if (aiEngine === 'gemini') {
         let modelsTried = 0;
@@ -680,6 +685,7 @@ export default function App() {
         // Outer loop: Models
         while (!success && modelsTried < totalModels) {
           const currentModelId = MODELS[modelIndex].id;
+          const currentModelName = MODELS[modelIndex].name;
           let keysTried = 0;
           const totalKeys = apiKeys.length;
 
@@ -688,8 +694,17 @@ export default function App() {
             // Normalize key index
             const actualKeyIndex = currentKeyIndex % totalKeys;
             const currentKey = apiKeys[actualKeyIndex];
+            const maskedKey = maskApiKey(currentKey, actualKeyIndex);
             
             setActiveApiKey(currentKey);
+            setActiveModelDisplay(currentModelName);
+            setActiveKeyDisplay(maskedKey);
+            setCurrentStatusDetail(`Menganalisis visual dengan ${currentModelName} [${maskedKey}]`);
+
+            setImages(prev => prev.map(i => 
+              i.id === img.id ? { ...i, status: 'processing', activeModel: currentModelName, activeKey: maskedKey } : i
+            ));
+
             const ai = new GoogleGenAI({ apiKey: currentKey });
 
             try {
@@ -760,8 +775,18 @@ export default function App() {
               };
 
               const duration = Date.now() - imageStartTime;
-              setImages(prev => prev.map(i => i.id === img.id ? { ...i, status: 'completed', metadata: updatedMetadata, processingTime: duration } : i));
+              setImages(prev => prev.map(i => i.id === img.id ? { 
+                ...i, 
+                status: 'completed', 
+                metadata: updatedMetadata, 
+                processingTime: duration,
+                activeModel: currentModelName,
+                activeKey: maskedKey,
+                error: undefined,
+                errorDiagnostic: undefined
+              } : i));
               success = true;
+              setLastRotationWarning(null);
               
               // SAVE successful pair
               lastSuccessKeyIndex.current = actualKeyIndex;
@@ -771,8 +796,23 @@ export default function App() {
               playChime();
             } catch (error) {
               console.error(`Error with key ${actualKeyIndex} on model ${currentModelId}:`, error);
-              lastErrorMessage = getErrorMessage(error);
+              const diag = categorizeApiError(error, { modelName: currentModelName, keyMasked: maskedKey });
+              lastDiagnostic = diag;
+              lastErrorMessage = diag.description || getErrorMessage(error);
               setErrorApiKeys(prev => [...new Set([...prev, currentKey])]);
+              
+              setLastRotationWarning({
+                message: `${diag.badge} pada ${maskedKey} (${currentModelName}) → Merotasi ke API Key berikutnya...`,
+                type: diag.type
+              });
+
+              if (diag.type === 'rate_limit') {
+                addToast(`⚠️ Rate Limit (429) ${maskedKey} → Mencoba Key berikutnya...`, "error");
+              } else if (diag.type === 'model_not_found') {
+                addToast(`⚠️ Model ${currentModelName} tidak tersedia (404) → Rotasi model...`, "error");
+              } else if (diag.type === 'invalid_key') {
+                addToast(`⚠️ ${maskedKey} Tidak Valid → Mencoba Key berikutnya...`, "error");
+              }
               
               // Try next key for the SAME model
               currentKeyIndex++;
@@ -782,13 +822,18 @@ export default function App() {
 
           if (!success) {
             // All keys failed for this model, rotate to next model
+            const prevModelName = MODELS[modelIndex].name;
             modelIndex = (modelIndex + 1) % MODELS.length;
             // IMPORTANT: reset key index to 0 so we try all keys for the NEW model
             currentKeyIndex = 0; 
             modelsTried++;
             
             if (modelsTried < totalModels) {
-              addToast(`Pencarian resource... mencoba model ${MODELS[modelIndex].name}`, "info");
+              setLastRotationWarning({
+                message: `Semua key gagal pada ${prevModelName} → Mencoba model ${MODELS[modelIndex].name}...`,
+                type: 'model_not_found'
+              });
+              addToast(`🔄 Rotasi Model: Mencoba ${MODELS[modelIndex].name}`, "info");
             }
           }
         }
@@ -800,6 +845,7 @@ export default function App() {
         // Outer loop: Groq Models
         while (!success && modelsTried < totalModels) {
           const currentModelId = GROQ_MODELS[groqModelIndex].id;
+          const currentModelName = GROQ_MODELS[groqModelIndex].name;
           let keysTried = 0;
           const totalKeys = groqKeys.length;
 
@@ -807,6 +853,16 @@ export default function App() {
           while (!success && keysTried < totalKeys) {
             const actualKeyIndex = currentKeyIndex % totalKeys;
             const activeKey = groqKeys[actualKeyIndex];
+            const maskedKey = maskApiKey(activeKey, actualKeyIndex);
+
+            setActiveApiKey(activeKey);
+            setActiveModelDisplay(currentModelName);
+            setActiveKeyDisplay(maskedKey);
+            setCurrentStatusDetail(`Menganalisis visual dengan Groq ${currentModelName} [${maskedKey}]`);
+
+            setImages(prev => prev.map(i => 
+              i.id === img.id ? { ...i, status: 'processing', activeModel: currentModelName, activeKey: maskedKey } : i
+            ));
 
             try {
               // Read file as base64
@@ -891,15 +947,33 @@ export default function App() {
               };
 
               const duration = Date.now() - imageStartTime;
-              setImages(prev => prev.map(i => i.id === img.id ? { ...i, status: 'completed', metadata: updatedMetadata, processingTime: duration } : i));
+              setImages(prev => prev.map(i => i.id === img.id ? { 
+                ...i, 
+                status: 'completed', 
+                metadata: updatedMetadata, 
+                processingTime: duration,
+                activeModel: currentModelName,
+                activeKey: maskedKey,
+                error: undefined,
+                errorDiagnostic: undefined
+              } : i));
               success = true;
+              setLastRotationWarning(null);
               lastSuccessKeyIndex.current = actualKeyIndex;
               lastSuccessGroqModelIndex.current = groqModelIndex;
               addToast(`Berhasil generate: ${img.file.name}`, "success");
               playChime();
             } catch (error: any) {
               console.error(`Error with keyIndex ${actualKeyIndex} on model ${currentModelId}:`, error);
-              lastErrorMessage = error.message || error;
+              const diag = categorizeApiError(error, { modelName: currentModelName, keyMasked: maskedKey });
+              lastDiagnostic = diag;
+              lastErrorMessage = diag.description || (error.message || error);
+              
+              setLastRotationWarning({
+                message: `${diag.badge} pada ${maskedKey} (${currentModelName}) → Merotasi key...`,
+                type: diag.type
+              });
+              
               currentKeyIndex++;
               keysTried++;
             }
@@ -907,13 +981,17 @@ export default function App() {
 
           if (!success) {
             // All keys failed for this model, rotate to next Groq model
+            const prevModelName = GROQ_MODELS[groqModelIndex].name;
             groqModelIndex = (groqModelIndex + 1) % GROQ_MODELS.length;
-            // IMPORTANT: reset key index to 0 so we try all keys for the NEW model
             currentKeyIndex = 0; 
             modelsTried++;
             
             if (modelsTried < totalModels) {
-              addToast(`Pencarian resource... mencoba model ${GROQ_MODELS[groqModelIndex].name}`, "info");
+              setLastRotationWarning({
+                message: `Semua key gagal pada ${prevModelName} → Mencoba model ${GROQ_MODELS[groqModelIndex].name}...`,
+                type: 'model_not_found'
+              });
+              addToast(`🔄 Rotasi Model Groq: Mencoba ${GROQ_MODELS[groqModelIndex].name}`, "info");
             }
           }
         }
@@ -922,7 +1000,12 @@ export default function App() {
       if (!success) {
         failedImageIds.push(img.id);
         setImages(prev => prev.map(i => 
-          i.id === img.id ? { ...i, status: 'error', error: lastErrorMessage } : i
+          i.id === img.id ? { 
+            ...i, 
+            status: 'error', 
+            error: lastErrorMessage,
+            errorDiagnostic: lastDiagnostic
+          } : i
         ));
         addToast(`Gagal generate: ${img.file.name}`, "error");
       }
@@ -947,6 +1030,10 @@ export default function App() {
     setIsGenerating(false);
     setIsPaused(false);
     isPausedRef.current = false;
+    setActiveModelDisplay('');
+    setActiveKeyDisplay('');
+    setCurrentStatusDetail('');
+    setLastRotationWarning(null);
     setLastGenerationDuration(finalDuration > 0 ? finalDuration : null);
     setStartTime(null);
     setCurrentTime(null);
@@ -1279,6 +1366,7 @@ export default function App() {
 
     let success = false;
     let lastErrorMessage = "Semua API Key gagal atau kuota habis";
+    let lastDiagnostic: ErrorDiagnostic | undefined;
     const imageStartTime = Date.now();
 
     if (aiEngine === 'gemini') {
@@ -1287,14 +1375,24 @@ export default function App() {
 
       while (!success && modelsTried < totalModels) {
         const currentModelId = MODELS[modelIndex].id;
+        const currentModelName = MODELS[modelIndex].name;
         let keysTried = 0;
         const totalKeys = apiKeys.length;
 
         while (!success && keysTried < totalKeys) {
           const actualKeyIndex = currentKeyIndex % totalKeys;
           const currentKey = apiKeys[actualKeyIndex];
+          const maskedKey = maskApiKey(currentKey, actualKeyIndex);
           
           setActiveApiKey(currentKey);
+          setActiveModelDisplay(currentModelName);
+          setActiveKeyDisplay(maskedKey);
+          setCurrentStatusDetail(`Menganalisis visual dengan ${currentModelName} [${maskedKey}]`);
+
+          setImages(prev => prev.map(i => 
+            i.id === id ? { ...i, status: 'processing', activeModel: currentModelName, activeKey: maskedKey } : i
+          ));
+
           const ai = new GoogleGenAI({ apiKey: currentKey });
 
           try {
@@ -1365,7 +1463,16 @@ export default function App() {
             };
 
             const duration = Date.now() - imageStartTime;
-            setImages(prev => prev.map(i => i.id === id ? { ...i, status: 'completed', metadata: updatedMetadata, processingTime: duration } : i));
+            setImages(prev => prev.map(i => i.id === id ? { 
+              ...i, 
+              status: 'completed', 
+              metadata: updatedMetadata, 
+              processingTime: duration,
+              activeModel: currentModelName,
+              activeKey: maskedKey,
+              error: undefined,
+              errorDiagnostic: undefined
+            } : i));
             success = true;
 
             // SAVE successful pair
@@ -1376,8 +1483,10 @@ export default function App() {
             playChime();
           } catch (error: any) {
             console.error(`Error with key ${actualKeyIndex} on model ${currentModelId}:`, error);
+            const diag = categorizeApiError(error, { modelName: currentModelName, keyMasked: maskedKey });
+            lastDiagnostic = diag;
+            lastErrorMessage = diag.description || getErrorMessage(error);
             setErrorApiKeys(prev => [...new Set([...prev, currentKey])]);
-            lastErrorMessage = error.message || error;
             
             currentKeyIndex++;
             keysTried++;
@@ -1408,6 +1517,16 @@ export default function App() {
         while (!success && keysTried < totalKeys) {
           const actualKeyIndex = currentKeyIndex % totalKeys;
           const activeKey = groqKeys[actualKeyIndex];
+          const maskedKey = maskApiKey(activeKey, actualKeyIndex);
+
+          setActiveApiKey(activeKey);
+          setActiveModelDisplay(currentModelName);
+          setActiveKeyDisplay(maskedKey);
+          setCurrentStatusDetail(`Menganalisis visual dengan Groq ${currentModelName} [${maskedKey}]`);
+
+          setImages(prev => prev.map(i => 
+            i.id === id ? { ...i, status: 'processing', activeModel: currentModelName, activeKey: maskedKey } : i
+          ));
 
           try {
             // Read file as base64
@@ -1491,7 +1610,16 @@ export default function App() {
             };
 
             const duration = Date.now() - imageStartTime;
-            setImages(prev => prev.map(i => i.id === id ? { ...i, status: 'completed', metadata: updatedMetadata, processingTime: duration } : i));
+            setImages(prev => prev.map(i => i.id === id ? { 
+              ...i, 
+              status: 'completed', 
+              metadata: updatedMetadata, 
+              processingTime: duration,
+              activeModel: currentModelName,
+              activeKey: maskedKey,
+              error: undefined,
+              errorDiagnostic: undefined
+            } : i));
             success = true;
             lastSuccessKeyIndex.current = actualKeyIndex;
             lastSuccessGroqModelIndex.current = groqModelIndex;
@@ -1499,7 +1627,9 @@ export default function App() {
             playChime();
           } catch (error: any) {
             console.error(`Error with keyIndex ${actualKeyIndex} on model ${currentModelId}:`, error);
-            lastErrorMessage = error.message || error;
+            const diag = categorizeApiError(error, { modelName: currentModelName, keyMasked: maskedKey });
+            lastDiagnostic = diag;
+            lastErrorMessage = diag.description || (error.message || error);
             currentKeyIndex++;
             keysTried++;
           }
@@ -1518,11 +1648,20 @@ export default function App() {
 
     if (!success) {
       setImages(prev => prev.map(i => 
-        i.id === id ? { ...i, status: 'error', error: lastErrorMessage } : i
+        i.id === id ? { 
+          ...i, 
+          status: 'error', 
+          error: lastErrorMessage,
+          errorDiagnostic: lastDiagnostic
+        } : i
       ));
       addToast(`Gagal regenerate: ${img.file.name}`, "error");
     }
     setIsGenerating(false);
+    setActiveModelDisplay('');
+    setActiveKeyDisplay('');
+    setCurrentStatusDetail('');
+    setLastRotationWarning(null);
     setLastGenerationDuration(Date.now() - batchStartTime);
     setStartTime(null);
     setCurrentTime(null);
@@ -1948,27 +2087,43 @@ export default function App() {
                 exit={{ opacity: 0, y: -20 }}
                 className={cn(
                   "absolute top-0 left-0 right-0 z-30 p-3 sm:p-4 backdrop-blur-md border-b transition-colors shadow-sm",
-                  isPaused ? "bg-amber-50/95 border-amber-200 text-amber-900" : "bg-white/90 border-slate-200"
+                  isPaused ? "bg-amber-50/95 border-amber-200 text-amber-900" : "bg-white/95 border-slate-200"
                 )}
               >
-                <div className="max-w-3xl mx-auto flex flex-col gap-2">
-                  <div className="flex justify-between items-center text-xs">
-                    <div className="flex items-center gap-2">
+                <div className="max-w-4xl mx-auto flex flex-col gap-2.5">
+                  <div className="flex flex-wrap justify-between items-center gap-2 text-xs">
+                    <div className="flex flex-wrap items-center gap-2">
                       {isPaused ? (
-                        <span className="flex items-center gap-1.5 font-bold text-amber-800">
+                        <span className="flex items-center gap-1.5 font-bold text-amber-800 bg-amber-100/80 px-2.5 py-0.5 rounded-full text-xs">
                           <Pause className="w-3.5 h-3.5 fill-current" />
                           Proses Dijeda
                         </span>
                       ) : (
-                        <span className="flex items-center gap-1.5 font-bold text-indigo-600">
+                        <span className="flex items-center gap-1.5 font-bold text-indigo-600 bg-indigo-50 px-2.5 py-0.5 rounded-full text-xs">
                           <Loader2 className="w-3.5 h-3.5 animate-spin" />
                           Memproses Gambar...
                         </span>
                       )}
-                      <span className="text-slate-300 font-normal">|</span>
-                      <span className="font-mono text-slate-600 font-bold">
+                      
+                      <span className="font-mono text-slate-700 font-bold bg-slate-100 px-2 py-0.5 rounded-lg text-xs">
                         {Math.round(progress)}%
                       </span>
+
+                      {/* Active Model Indicator */}
+                      {(activeModelDisplay || selectedModel) && (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-700 bg-indigo-50/80 border border-indigo-100 px-2 py-0.5 rounded-md">
+                          <Sparkles className="w-3 h-3 text-indigo-500" />
+                          {activeModelDisplay || selectedModel}
+                        </span>
+                      )}
+
+                      {/* Active Key Indicator */}
+                      {activeKeyDisplay && (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-mono font-bold text-slate-700 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-md">
+                          <Key className="w-3 h-3 text-amber-500" />
+                          {activeKeyDisplay}
+                        </span>
+                      )}
                     </div>
 
                     <div className="flex items-center gap-2">
@@ -2006,6 +2161,14 @@ export default function App() {
                     </div>
                   </div>
 
+                  {/* Rotation warning banner */}
+                  {lastRotationWarning && (
+                    <div className="text-[11px] font-semibold text-amber-800 bg-amber-100/90 border border-amber-200 px-2.5 py-1 rounded-lg flex items-center gap-1.5 animate-pulse">
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                      <span>{lastRotationWarning.message}</span>
+                    </div>
+                  )}
+
                   <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
                     <motion.div 
                       className={cn("h-full", isPaused ? "bg-amber-500" : "bg-indigo-500")}
@@ -2019,179 +2182,131 @@ export default function App() {
           </AnimatePresence>
 
           <div className="flex-1 overflow-y-auto p-4 sm:p-8 custom-scrollbar pb-24 md:pb-8">
-            {/* Page Tabs */}
-            <div className="flex justify-center mb-6 max-w-md mx-auto">
-              <div className="bg-slate-100 p-1.5 rounded-2xl flex items-center gap-1.5 border border-slate-200/50 w-full shadow-inner">
-                <button 
-                  onClick={() => setCurrentPage('generator')}
-                  className={cn(
-                    "flex-1 py-2 px-3 rounded-xl text-[11px] sm:text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 transition-all duration-300",
-                    currentPage === 'generator' 
-                      ? "bg-white text-indigo-600 shadow-md shadow-indigo-100/30 font-black border border-slate-200/20" 
-                      : "text-slate-500 hover:text-slate-700 hover:bg-slate-50/50"
-                  )}
-                  id="tab-generator"
-                >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  AI Generator
-                </button>
-                <button 
-                  onClick={() => setCurrentPage('injector')}
-                  className={cn(
-                    "flex-1 py-2 px-3 rounded-xl text-[11px] sm:text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 transition-all duration-300",
-                    currentPage === 'injector' 
-                      ? "bg-white text-indigo-600 shadow-md shadow-indigo-100/30 font-black border border-slate-200/20" 
-                      : "text-slate-500 hover:text-slate-700 hover:bg-slate-50/50"
-                  )}
-                  id="tab-injector"
-                >
-                  <Layers className="w-3.5 h-3.5" />
-                  Suntik EPS
-                </button>
-                <button 
-                  onClick={() => setCurrentPage('teepublic')}
-                  className={cn(
-                    "flex-1 py-1.5 sm:py-2 px-2 sm:px-3 rounded-xl text-[11px] sm:text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 sm:gap-2 transition-all duration-300",
-                    currentPage === 'teepublic' 
-                      ? "bg-white text-indigo-600 shadow-md shadow-indigo-100/30 font-black border border-slate-200/20" 
-                      : "text-slate-500 hover:text-slate-700 hover:bg-slate-50/50"
-                  )}
-                  id="tab-teepublic"
-                >
-                  <ImageIcon className="w-3.5 h-3.5" />
-                  TeePublic
-                </button>
+            <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-6 lg:gap-8 max-w-[1600px] mx-auto">
+              <div className={cn(
+                "transition-all duration-300",
+                activePlatform ? "z-[60] relative" : "z-10 relative"
+              )}>
+                <AssetGrid 
+                  images={images}
+                  selectedId={selectedId}
+                  setSelectedId={setSelectedId}
+                  setImages={setImages}
+                  isDragActive={isDragActive}
+                  viewMode={viewMode}
+                  open={open}
+                  showSettingsPanel={showSettingsPanel}
+                  setShowSettingsPanel={setShowSettingsPanel}
+                  titleLength={titleLength}
+                  setTitleLength={setTitleLength}
+                  keywordCount={keywordCount}
+                  setKeywordCount={setKeywordCount}
+                  titlePreset={titlePreset}
+                  setTitlePreset={setTitlePreset}
+                  styleHint={styleHint}
+                  setStyleHint={setStyleHint}
+                  generateMetadata={generateMetadata}
+                  isGenerating={isGenerating}
+                  isPaused={isPaused}
+                  pauseGeneration={pauseGeneration}
+                  resumeGeneration={resumeGeneration}
+                  stopGeneration={stopGeneration}
+                  startTime={sessionStartTimeRef.current}
+                  currentTime={currentTime}
+                  elapsedBeforePause={elapsedBeforePause}
+                  lastGenerationDuration={lastGenerationDuration}
+                  aiEngine={aiEngine}
+                  setAiEngine={setAiEngine}
+                  groqKeys={groqKeys}
+                  selectedGroqModel={selectedGroqModel}
+                  setSelectedGroqModel={setSelectedGroqModel}
+                  apiKeys={apiKeys}
+                  setShowKeyModal={setShowKeyModal}
+                  selectedModel={selectedModel}
+                  setSelectedModel={setSelectedModel}
+                  autoRotateModel={autoRotateModel}
+                  toggleAutoRotateModel={toggleAutoRotateModel}
+                  autoRotateGroqModel={autoRotateGroqModel}
+                  toggleAutoRotateGroqModel={toggleAutoRotateGroqModel}
+                  autoRetryFailed={autoRetryFailed}
+                  toggleAutoRetryFailed={toggleAutoRetryFailed}
+                  onManualAutoRetry={handleManualAutoRetry}
+                  activeModelDisplay={activeModelDisplay}
+                  activeKeyDisplay={activeKeyDisplay}
+                  currentStatusDetail={currentStatusDetail}
+                  lastRotationWarning={lastRotationWarning}
+                />
               </div>
-            </div>
 
-            {currentPage === 'generator' ? (
-              <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-6 lg:gap-8 max-w-[1600px] mx-auto">
-              
-                <div className={cn(
+              <div className="space-y-6">
+                <div ref={downloadHubRef} className={cn(
                   "transition-all duration-300",
-                  activePlatform ? "z-[60] relative" : "z-10 relative"
+                  activePlatform ? "z-[999] relative" : "z-20 relative"
                 )}>
-                  <AssetGrid 
+                  <BatchDownloadHub 
                     images={images}
-                    selectedId={selectedId}
-                    setSelectedId={setSelectedId}
-                    setImages={setImages}
-                    isDragActive={isDragActive}
-                    viewMode={viewMode}
-                    open={open}
-                    showSettingsPanel={showSettingsPanel}
-                    setShowSettingsPanel={setShowSettingsPanel}
-                    titleLength={titleLength}
-                    setTitleLength={setTitleLength}
-                    keywordCount={keywordCount}
-                    setKeywordCount={setKeywordCount}
-                    titlePreset={titlePreset}
-                    setTitlePreset={setTitlePreset}
-                    styleHint={styleHint}
-                    setStyleHint={setStyleHint}
-                    generateMetadata={generateMetadata}
                     isGenerating={isGenerating}
                     isPaused={isPaused}
-                    pauseGeneration={pauseGeneration}
-                    resumeGeneration={resumeGeneration}
-                    stopGeneration={stopGeneration}
-                    startTime={sessionStartTimeRef.current}
-                    currentTime={currentTime}
-                    elapsedBeforePause={elapsedBeforePause}
-                    lastGenerationDuration={lastGenerationDuration}
-                    aiEngine={aiEngine}
-                    setAiEngine={setAiEngine}
-                    groqKeys={groqKeys}
-                    selectedGroqModel={selectedGroqModel}
-                    setSelectedGroqModel={setSelectedGroqModel}
-                    apiKeys={apiKeys}
-                    setShowKeyModal={setShowKeyModal}
-                    selectedModel={selectedModel}
-                    setSelectedModel={setSelectedModel}
-                    autoRotateModel={autoRotateModel}
-                    toggleAutoRotateModel={toggleAutoRotateModel}
-                    autoRotateGroqModel={autoRotateGroqModel}
-                    toggleAutoRotateGroqModel={toggleAutoRotateGroqModel}
-                    autoRetryFailed={autoRetryFailed}
-                    toggleAutoRetryFailed={toggleAutoRetryFailed}
-                    onManualAutoRetry={handleManualAutoRetry}
+                    exportExtension={exportExtension}
+                    setExportExtension={setExportExtension}
+                    isGenerativeAI={isGenerativeAI}
+                    setIsGenerativeAI={setIsGenerativeAI}
+                    aiModel={aiModel}
+                    setAiModel={setAiModel}
+                    downloadCSV={downloadCSV}
+                    downloadAdobeStockCSV={downloadAdobeStockCSV}
+                    downloadShutterstockCSV={downloadShutterstockCSV}
+                    downloadWithMetadata={downloadWithMetadata}
+                    activePlatform={activePlatform}
+                    setActivePlatform={setActivePlatform}
+                    viewMode={viewMode}
                   />
                 </div>
 
-                <div className="space-y-6">
-                  <div ref={downloadHubRef} className={cn(
-                    "transition-all duration-300",
-                    activePlatform ? "z-[999] relative" : "z-20 relative"
-                  )}>
-                    <BatchDownloadHub 
-                      images={images}
-                      isGenerating={isGenerating}
-                      isPaused={isPaused}
-                      exportExtension={exportExtension}
-                      setExportExtension={setExportExtension}
-                      isGenerativeAI={isGenerativeAI}
-                      setIsGenerativeAI={setIsGenerativeAI}
-                      aiModel={aiModel}
-                      setAiModel={setAiModel}
-                      downloadCSV={downloadCSV}
-                      downloadAdobeStockCSV={downloadAdobeStockCSV}
-                      downloadShutterstockCSV={downloadShutterstockCSV}
-                      downloadWithMetadata={downloadWithMetadata}
-                      activePlatform={activePlatform}
-                      setActivePlatform={setActivePlatform}
-                      viewMode={viewMode}
-                    />
-                  </div>
-
-                  <div className={cn(
-                    "transition-all duration-300",
-                    activeDownloadMenu ? "z-[99] relative" : "z-10 relative"
-                  )}>
-                    <MetadataPanel 
-                      selectedImage={selectedImage}
-                      setSelectedId={setSelectedId}
-                      viewMode={viewMode}
-                      setViewMode={setViewMode}
-                      isEditing={isEditing}
-                      setIsEditing={setIsEditing}
-                      startEditing={startEditing}
-                      editData={editData}
-                      setEditData={setEditData}
-                      copyToClipboard={copyToClipboard}
-                      copiedField={copiedField}
-                      saveEdit={saveEdit}
-                      generateMetadata={generateMetadata}
-                      isGenerating={isGenerating}
-                      selectedModel={aiModel}
-                      regenerateSingleMetadata={regenerateSingleMetadata}
-                      activeDownloadMenu={activeDownloadMenu}
-                      setActiveDownloadMenu={setActiveDownloadMenu}
-                      exportExtension={exportExtension}
-                      setExportExtension={setExportExtension}
-                      downloadCSV={downloadCSV}
-                      isGenerativeAI={isGenerativeAI}
-                      setIsGenerativeAI={setIsGenerativeAI}
-                      aiModel={aiModel}
-                      setAiModel={setAiModel}
-                      downloadAdobeStockCSV={downloadAdobeStockCSV}
-                      downloadShutterstockCSV={downloadShutterstockCSV}
-                      downloadWithMetadata={downloadWithMetadata}
-                      images={images}
-                      addToast={addToast}
-                      onOptimizeMetadata={handleOptimizeMetadata}
-                    />
-                  </div>
+                <div className={cn(
+                  "transition-all duration-300",
+                  activeDownloadMenu ? "z-[99] relative" : "z-10 relative"
+                )}>
+                  <MetadataPanel 
+                    selectedImage={selectedImage}
+                    setSelectedId={setSelectedId}
+                    viewMode={viewMode}
+                    setViewMode={setViewMode}
+                    isEditing={isEditing}
+                    setIsEditing={setIsEditing}
+                    startEditing={startEditing}
+                    editData={editData}
+                    setEditData={setEditData}
+                    copyToClipboard={copyToClipboard}
+                    copiedField={copiedField}
+                    saveEdit={saveEdit}
+                    generateMetadata={generateMetadata}
+                    isGenerating={isGenerating}
+                    selectedModel={aiModel}
+                    regenerateSingleMetadata={regenerateSingleMetadata}
+                    activeDownloadMenu={activeDownloadMenu}
+                    setActiveDownloadMenu={setActiveDownloadMenu}
+                    exportExtension={exportExtension}
+                    setExportExtension={setExportExtension}
+                    downloadCSV={downloadCSV}
+                    isGenerativeAI={isGenerativeAI}
+                    setIsGenerativeAI={setIsGenerativeAI}
+                    aiModel={aiModel}
+                    setAiModel={setAiModel}
+                    downloadAdobeStockCSV={downloadAdobeStockCSV}
+                    downloadShutterstockCSV={downloadShutterstockCSV}
+                    downloadWithMetadata={downloadWithMetadata}
+                    images={images}
+                    addToast={addToast}
+                    onOptimizeMetadata={handleOptimizeMetadata}
+                    activeModelDisplay={activeModelDisplay}
+                    activeKeyDisplay={activeKeyDisplay}
+                    currentStatusDetail={currentStatusDetail}
+                    lastRotationWarning={lastRotationWarning}
+                  />
                 </div>
               </div>
-            ) : currentPage === 'injector' ? (
-              <EpsMetadataInjector />
-            ) : (
-              <TeePublicGenerator 
-                apiKeys={apiKeys}
-                setShowKeyModal={setShowKeyModal}
-                selectedModel={selectedModel}
-              />
-            )}
+            </div>
           </div>
         </div>
       </main>

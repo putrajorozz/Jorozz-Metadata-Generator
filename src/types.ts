@@ -5,6 +5,16 @@ export interface PngTreeMetadata {
   mainCopy: string;
 }
 
+export interface ErrorDiagnostic {
+  type: 'rate_limit' | 'model_not_found' | 'invalid_key' | 'quota_exhausted' | 'network' | 'unknown';
+  badge: string;
+  title: string;
+  description: string;
+  rawMessage: string;
+  modelName?: string;
+  keyMasked?: string;
+}
+
 export interface ImageData {
   id: string;
   file: File;
@@ -12,6 +22,8 @@ export interface ImageData {
   hash?: string;
   status: 'pending' | 'processing' | 'completed' | 'error';
   isAiGenerated: boolean;
+  activeModel?: string;
+  activeKey?: string;
   metadata?: {
     title: string;
     description: string;
@@ -25,6 +37,7 @@ export interface ImageData {
     pngTree?: PngTreeMetadata;
   };
   error?: string;
+  errorDiagnostic?: ErrorDiagnostic;
   processingTime?: number;
 }
 

@@ -12,7 +12,10 @@ import {
   X,
   ShieldCheck,
   Zap,
-  CheckCircle2
+  CheckCircle2,
+  Key,
+  AlertTriangle,
+  RefreshCw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useEffect, useMemo } from 'react';
@@ -59,6 +62,10 @@ interface MetadataPanelProps {
   images: ImageData[];
   addToast: (message: string, type?: 'success' | 'error' | 'info') => void;
   onOptimizeMetadata?: (id: string) => void;
+  activeModelDisplay?: string;
+  activeKeyDisplay?: string;
+  currentStatusDetail?: string;
+  lastRotationWarning?: { message: string; type: string } | null;
 }
 
 export function MetadataPanel({
@@ -92,7 +99,11 @@ export function MetadataPanel({
   downloadWithMetadata,
   images,
   addToast,
-  onOptimizeMetadata
+  onOptimizeMetadata,
+  activeModelDisplay,
+  activeKeyDisplay,
+  currentStatusDetail,
+  lastRotationWarning,
 }: MetadataPanelProps) {
   const completedImages = images.filter(img => img.status === 'completed' && img.metadata);
 
@@ -647,17 +658,95 @@ export function MetadataPanel({
             )}
           </div>
         ) : selectedImage.status === 'processing' ? (
-          <div className="py-20 flex flex-col items-center justify-center text-center">
-            <Loader2 className="w-10 h-10 text-indigo-500 animate-spin mb-4" />
-            <h3 className="font-bold text-slate-800">Menganalisis Gambar...</h3>
-            <p className="text-xs text-slate-500 mt-1">Menggunakan {selectedModel}</p>
+          <div className="py-14 px-4 flex flex-col items-center justify-center text-center">
+            <div className="relative mb-5">
+              <div className="w-16 h-16 rounded-3xl bg-indigo-50 border-2 border-indigo-100 flex items-center justify-center shadow-inner">
+                <Loader2 className="w-8 h-8 text-indigo-600 animate-spin" />
+              </div>
+              <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-indigo-600"></span>
+              </span>
+            </div>
+
+            <h3 className="font-extrabold text-slate-800 text-base">Sedang Menganalisis Visual...</h3>
+            <p className="text-xs text-slate-500 mt-1 max-w-xs leading-relaxed">
+              AI sedang membaca struktur objek, elemen komposisi, dan merumuskan judul serta kata kunci microstock.
+            </p>
+
+            <div className="mt-5 w-full max-w-xs bg-slate-50 border border-slate-200/80 rounded-2xl p-3.5 space-y-2 text-left shadow-2xs">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-400 font-semibold flex items-center gap-1">
+                  <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
+                  Model AI
+                </span>
+                <span className="font-bold text-indigo-700 bg-white px-2 py-0.5 rounded-lg border border-indigo-100 shadow-2xs text-[11px] truncate max-w-[140px]">
+                  {selectedImage.activeModel || activeModelDisplay || selectedModel}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-400 font-semibold flex items-center gap-1">
+                  <Key className="w-3.5 h-3.5 text-amber-500" />
+                  API Key Aktif
+                </span>
+                <span className="font-mono font-bold text-slate-700 bg-white px-2 py-0.5 rounded-lg border border-slate-200 shadow-2xs text-[11px]">
+                  {selectedImage.activeKey || activeKeyDisplay || 'Key #1'}
+                </span>
+              </div>
+            </div>
           </div>
         ) : selectedImage.status === 'error' ? (
-          <div className="py-20 flex flex-col items-center justify-center text-center">
-            <AlertCircle className="w-10 h-10 text-red-500 mb-4" />
-            <h3 className="font-bold text-slate-800">Terjadi Kesalahan</h3>
-            <p className="text-xs text-red-500 mt-1 max-w-xs">{selectedImage.error}</p>
-            <button onClick={generateMetadata} className="mt-6 px-6 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold">Coba Lagi</button>
+          <div className="py-10 px-4 flex flex-col items-center justify-center text-center">
+            <div className="w-14 h-14 rounded-3xl bg-red-50 border-2 border-red-100 flex items-center justify-center text-red-500 mb-4 shadow-sm">
+              <AlertTriangle className="w-7 h-7" />
+            </div>
+
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-red-100 text-red-800 rounded-full text-xs font-black uppercase tracking-wider mb-2">
+              <span>{selectedImage.errorDiagnostic?.badge || 'Gagal Diproses'}</span>
+            </div>
+
+            <h3 className="font-extrabold text-slate-800 text-base">
+              {selectedImage.errorDiagnostic?.title || 'Terjadi Kesalahan AI'}
+            </h3>
+
+            <p className="text-xs text-slate-600 mt-2 max-w-sm leading-relaxed bg-red-50/60 p-3 rounded-xl border border-red-100 text-left">
+              {selectedImage.errorDiagnostic?.description || selectedImage.error}
+            </p>
+
+            {/* Error Detail / Key Info */}
+            <div className="mt-4 w-full max-w-sm bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-1.5 text-left text-[11px]">
+              {selectedImage.activeModel && (
+                <div className="flex justify-between items-center text-slate-600">
+                  <span className="text-slate-400">Model Dicoba:</span>
+                  <span className="font-semibold text-slate-800">{selectedImage.activeModel}</span>
+                </div>
+              )}
+              {selectedImage.activeKey && (
+                <div className="flex justify-between items-center text-slate-600">
+                  <span className="text-slate-400">API Key Dicoba:</span>
+                  <span className="font-mono font-semibold text-slate-800">{selectedImage.activeKey}</span>
+                </div>
+              )}
+              {selectedImage.error && (
+                <div className="pt-1 border-t border-slate-200/60">
+                  <span className="text-[10px] text-slate-400 block mb-0.5">Raw Error Response:</span>
+                  <code className="text-[10px] text-red-600 font-mono break-all line-clamp-3 block bg-white p-1.5 rounded border border-red-100">
+                    {selectedImage.error}
+                  </code>
+                </div>
+              )}
+            </div>
+
+            <div className="mt-5 flex gap-2 w-full max-w-sm">
+              <button 
+                onClick={() => regenerateSingleMetadata(selectedImage.id)} 
+                className="flex-1 py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 shadow-md shadow-indigo-100 transition-all active:scale-95"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Generate Ulang Gambar Ini</span>
+              </button>
+            </div>
           </div>
         ) : (
           <div className="py-20 flex flex-col items-center justify-center text-center">
