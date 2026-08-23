@@ -1,3 +1,14 @@
+export function cleanShutterstockText(text: string): string {
+  if (!text) return '';
+  let str = String(text);
+  // Replace ampersand & with 'and'
+  str = str.replace(/\s*&\s*/g, ' and ');
+  // Replace disallowed symbols (<, >, /, \) with space
+  str = str.replace(/[/\\<>]/g, ' ');
+  // Collapse multiple spaces
+  return str.replace(/\s+/g, ' ').trim();
+}
+
 export interface BuildPromptOptions {
   isTransparent?: boolean;
   titleLength?: number;
@@ -77,11 +88,15 @@ Generate the following metadata in JSON format:
 
 CRITICAL CONSTRAINTS:
 - DO NOT use banned stock clutter words: "oriental", "png", "download", "free", "stock", "high quality", "buy".
+- SHUTTERSTOCK CHARACTER RESTRICTION: NEVER use characters '>', '<', '/', '&' anywhere in title, description, or keywords. Replace '&' with 'and', and use spaces or words instead of slashes '/'. Shutterstock strictly rejects 'Please remove > < / &'.
 - Return raw JSON matching the requested fields cleanly.`;
 }
 
 export function sanitizeMicrostockMetadata(raw: any, targetKeywordCount = 50) {
   let title = String(raw.title || '').trim();
+  // Clean Shutterstock disallowed characters (&, <, >, /, \)
+  title = cleanShutterstockText(title);
+
   // Strip robotic prefix if model accidentally includes it
   title = title.replace(/^(a|an|the|image of|photo of|vector of|vector illustration of|3d render of|illustration of|close up of|picture of)\s+/i, '');
   // Format Title Case
@@ -91,12 +106,15 @@ export function sanitizeMicrostockMetadata(raw: any, targetKeywordCount = 50) {
       title = title.slice(0, -1);
     }
   }
+  title = cleanShutterstockText(title);
 
   let description = String(raw.description || '').trim();
+  description = cleanShutterstockText(description);
   description = description.replace(/^(this is a|an image of|a photo of|picture showing)\s+/i, '');
   if (description.length > 0) {
     description = description.charAt(0).toUpperCase() + description.slice(1);
   }
+  description = cleanShutterstockText(description);
 
   // Sanitize keywords
   let rawKeywords: string[] = [];
@@ -111,7 +129,9 @@ export function sanitizeMicrostockMetadata(raw: any, targetKeywordCount = 50) {
 
   for (let kw of rawKeywords) {
     let clean = String(kw || '').toLowerCase().trim();
+    clean = clean.replace(/\s*&\s*/g, ' and ');
     clean = clean.replace(/[^a-z0-9\s-]/g, '').trim();
+    clean = clean.replace(/\s+/g, ' ').trim();
     if (clean.length <= 1) continue;
     if (bannedLower.some(banned => clean.includes(banned))) continue;
     cleanedKeywordsSet.add(clean);

@@ -38,7 +38,7 @@ import {
 import { GoogleGenAI, Type } from "@google/genai";
 import * as piexif from "piexifjs";
 import JSZip from "jszip";
-import { buildMicrostockPrompt, sanitizeMicrostockMetadata } from './lib/metadataUtils';
+import { buildMicrostockPrompt, sanitizeMicrostockMetadata, cleanShutterstockText } from './lib/metadataUtils';
 import { cn } from './lib/utils';
 
 // Import new components
@@ -1806,12 +1806,17 @@ export default function App() {
       const isIllustration = exportExtension === '.eps' ? "Yes" : "No";
       
       // Use Title as Description if Title exists, as it follow the stricter "human" rules
-      const description = img.metadata!.title || img.metadata!.description;
+      const rawDescription = img.metadata!.title || img.metadata!.description;
+      const description = cleanShutterstockText(rawDescription);
+      const cleanKeywords = img.metadata!.keywords
+        .map(kw => cleanShutterstockText(kw))
+        .filter(Boolean)
+        .join(', ');
       
       return [
         fileNameWithExt,
         `"${description.replace(/"/g, '""')}"`,
-        `"${img.metadata!.keywords.join(', ').replace(/"/g, '""')}"`,
+        `"${cleanKeywords.replace(/"/g, '""')}"`,
         `"${(img.metadata!.categories || ["Miscellaneous"]).join(',').replace(/"/g, '""')}"`,
         "No", // Editorial
         "No", // Mature content
