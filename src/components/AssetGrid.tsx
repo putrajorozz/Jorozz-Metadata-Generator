@@ -391,8 +391,11 @@ export function AssetGrid({
                       <span className="text-[10px] font-bold text-slate-700">Auto Rotate Model</span>
                       <div className="relative group inline-block">
                         <Info className="w-3.5 h-3.5 text-indigo-500 hover:text-indigo-700 transition-colors cursor-pointer" />
-                        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-52 hidden group-hover:block bg-slate-900 text-white text-[9px] font-normal p-2 rounded-lg leading-normal shadow-md z-50 pointer-events-none">
-                          Saat aktif, sistem otomatis beralih model Gemini lain jika model utama mengalami limit kuota/rate limit.
+                        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 hidden group-hover:block bg-slate-900 text-white text-[9px] font-normal p-2 rounded-lg leading-normal shadow-md z-50 pointer-events-none">
+                          {apiKeys.length > 1 
+                            ? "Sistem merotasi API Key & Model secara otomatis saat terjadi rate limit/kuota habis."
+                            : "Sistem merotasi Model Gemini secara otomatis (1 API Key terdeteksi)."
+                          }
                         </div>
                       </div>
                     </div>
@@ -410,6 +413,43 @@ export function AssetGrid({
                       {autoRotateModel ? 'ON' : 'OFF'}
                     </button>
                   </div>
+
+                  {/* Smart Rotation Mode Badge */}
+                  {autoRotateModel && (
+                    <div className={cn(
+                      "p-2 rounded-xl text-[9.5px] font-semibold flex items-center justify-between gap-2 border transition-all",
+                      apiKeys.length > 1 
+                        ? "bg-emerald-50/80 border-emerald-200/80 text-emerald-900" 
+                        : apiKeys.length === 1 
+                          ? "bg-indigo-50/80 border-indigo-200/80 text-indigo-900" 
+                          : "bg-amber-50/80 border-amber-200/80 text-amber-900"
+                    )}>
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <Sparkles className={cn(
+                          "w-3.5 h-3.5 shrink-0", 
+                          apiKeys.length > 1 ? "text-emerald-600" : apiKeys.length === 1 ? "text-indigo-600" : "text-amber-600"
+                        )} />
+                        <span className="truncate">
+                          {apiKeys.length > 1 
+                            ? <span>Smart Rotate: <strong>Key & Model</strong></span> 
+                            : apiKeys.length === 1 
+                              ? <span>Smart Rotate: <strong>Model Only</strong></span> 
+                              : <span>Smart Rotate: <strong>Belum ada Key</strong></span>
+                          }
+                        </span>
+                      </div>
+                      <span className={cn(
+                        "text-[8.5px] font-black px-1.5 py-0.5 rounded shrink-0",
+                        apiKeys.length > 1 
+                          ? "bg-emerald-200/80 text-emerald-900" 
+                          : apiKeys.length === 1 
+                            ? "bg-indigo-200/80 text-indigo-900" 
+                            : "bg-amber-200/80 text-amber-900"
+                      )}>
+                        {apiKeys.length} Key
+                      </span>
+                    </div>
+                  )}
                 </div>
                ) : (
                 <div className="space-y-2 pt-0.5">
@@ -450,7 +490,10 @@ export function AssetGrid({
                       <div className="relative group inline-block">
                         <Info className="w-3.5 h-3.5 text-pink-500 hover:text-pink-700 transition-colors cursor-pointer" />
                         <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-52 hidden group-hover:block bg-slate-900 text-white text-[9px] font-normal p-2 rounded-lg leading-normal shadow-md z-50 pointer-events-none">
-                          Saat aktif, sistem otomatis beralih model Groq lain jika model utama mengalami limit kuota/rate limit.
+                          {groqKeys.length > 1 
+                            ? "Sistem merotasi Groq API Key & Model secara otomatis saat terjadi rate limit/kuota habis."
+                            : "Sistem merotasi Model Groq secara otomatis (1 Groq Key terdeteksi)."
+                          }
                         </div>
                       </div>
                     </div>
@@ -468,6 +511,43 @@ export function AssetGrid({
                       {autoRotateGroqModel ? 'ON' : 'OFF'}
                     </button>
                   </div>
+
+                  {/* Smart Rotation Mode Badge for Groq */}
+                  {autoRotateGroqModel && (
+                    <div className={cn(
+                      "p-2 rounded-xl text-[9.5px] font-semibold flex items-center justify-between gap-2 border transition-all",
+                      groqKeys.length > 1 
+                        ? "bg-emerald-50/80 border-emerald-200/80 text-emerald-900" 
+                        : groqKeys.length === 1 
+                          ? "bg-pink-50/80 border-pink-200/80 text-pink-900" 
+                          : "bg-amber-50/80 border-amber-200/80 text-amber-900"
+                    )}>
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <Sparkles className={cn(
+                          "w-3.5 h-3.5 shrink-0", 
+                          groqKeys.length > 1 ? "text-emerald-600" : groqKeys.length === 1 ? "text-pink-600" : "text-amber-600"
+                        )} />
+                        <span className="truncate">
+                          {groqKeys.length > 1 
+                            ? <span>Smart Rotate: <strong>Key & Model Groq</strong></span> 
+                            : groqKeys.length === 1 
+                              ? <span>Smart Rotate: <strong>Model Groq Only</strong></span> 
+                              : <span>Smart Rotate: <strong>Belum ada Groq Key</strong></span>
+                          }
+                        </span>
+                      </div>
+                      <span className={cn(
+                        "text-[8.5px] font-black px-1.5 py-0.5 rounded shrink-0",
+                        groqKeys.length > 1 
+                          ? "bg-emerald-200/80 text-emerald-900" 
+                          : groqKeys.length === 1 
+                            ? "bg-pink-200/80 text-pink-900" 
+                            : "bg-amber-200/80 text-amber-900"
+                      )}>
+                        {groqKeys.length} Key
+                      </span>
+                    </div>
+                  )}
 
                   {/* Auto-Retry Failed Images Toggle */}
                   <div className="flex items-center justify-between p-2 rounded-xl bg-amber-50/70 border border-amber-200/80 relative overflow-visible mt-2">

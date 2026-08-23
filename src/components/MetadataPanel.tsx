@@ -15,13 +15,29 @@ import {
   CheckCircle2,
   Key,
   AlertTriangle,
-  RefreshCw
+  RefreshCw,
+  Layers
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useEffect, useMemo } from 'react';
 import { cn } from '../lib/utils';
 import { ImageData } from '../types';
 import { calculateSeoScore, sanitizeMicrostockMetadata } from '../lib/metadataUtils';
+
+const SHUTTERSTOCK_CATEGORIES = [
+  "Abstract", "Animals/Wildlife", "Arts", "Backgrounds/Textures", "Beauty/Fashion", 
+  "Buildings/Landmarks", "Business/Finance", "Celebrities", "Education", "Food and drink", 
+  "Healthcare/Medical", "Holidays", "Industrial", "Interiors", "Miscellaneous", 
+  "Nature", "Objects", "Parks/Outdoor", "People", "Religion", "Science", 
+  "Signs/Symbols", "Sports/Recreation", "Technology", "Transportation", "Vintage"
+];
+
+const ADOBE_CATEGORIES = [
+  "Animals", "Buildings And Architecture", "Business", "Drinks", "The Environment", 
+  "States of Mind", "Food", "Graphic Resources", "Hobbies and Leisure", "Industry", 
+  "Landscapes", "Lifestyle", "People", "Plants and Flowers", "Culture and Religion", 
+  "Science", "Social Issues", "Sports", "Technology", "Transport", "Travel"
+];
 
 interface MetadataPanelProps {
   selectedImage: ImageData | undefined;
@@ -35,6 +51,9 @@ interface MetadataPanelProps {
     title: string; 
     description: string; 
     keywords: string;
+    category1?: string;
+    category2?: string;
+    adobeCategory?: string;
     ptMainKeywords?: string;
     ptSecondaryKeywords?: string;
     ptMainCopy?: string;
@@ -475,6 +494,141 @@ export function MetadataPanel({
                             {k}
                           </span>
                         ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Category Recommendation Field (Shutterstock & Adobe Stock) */}
+                  <div className="space-y-2 pt-2 border-t border-slate-100/80">
+                    <div className="flex justify-between items-center">
+                      <label className="text-[10px] uppercase font-bold text-indigo-600 tracking-wider flex items-center gap-1.5">
+                        <Layers className="w-3.5 h-3.5 text-indigo-500" />
+                        Rekomendasi Kategori (Shutterstock & Adobe Stock)
+                      </label>
+                      {!isEditing && (
+                        <button 
+                          onClick={() => copyToClipboard(
+                            `Shutterstock Kat 1: ${selectedImage.metadata!.categories?.[0] || '-'}\nShutterstock Kat 2: ${selectedImage.metadata!.categories?.[1] || '-'}\nAdobe Stock Kat: ${selectedImage.metadata!.adobeCategory || '-'}`, 
+                            'all-cats'
+                          )} 
+                          className="flex items-center gap-1 p-1 px-2 hover:bg-slate-100 rounded-lg text-slate-400 text-[10px] font-bold" 
+                          id="btn-copy-all-cats"
+                          title="Copy Semua Kategori"
+                        >
+                          {copiedField === 'all-cats' ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+                          <span>{copiedField === 'all-cats' ? 'Tersalin' : 'Copy Semua'}</span>
+                        </button>
+                      )}
+                    </div>
+
+                    {isEditing ? (
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3.5 bg-slate-50 border border-indigo-200/80 rounded-2xl">
+                        <div>
+                          <label className="text-[9px] font-bold uppercase text-amber-600 block mb-1">Shutterstock Kat. 1</label>
+                          <select
+                            value={editData?.category1 || ''}
+                            onChange={(e) => setEditData((p: any) => p ? {...p, category1: e.target.value} : null)}
+                            className="w-full p-2.5 bg-white border border-indigo-200 rounded-xl text-xs font-semibold text-slate-800 focus:ring-2 ring-indigo-500/10 focus:outline-none"
+                          >
+                            <option value="">-- Pilih Kat. 1 --</option>
+                            {SHUTTERSTOCK_CATEGORIES.map(cat => (
+                              <option key={cat} value={cat}>{cat}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="text-[9px] font-bold uppercase text-amber-600 block mb-1">Shutterstock Kat. 2</label>
+                          <select
+                            value={editData?.category2 || ''}
+                            onChange={(e) => setEditData((p: any) => p ? {...p, category2: e.target.value} : null)}
+                            className="w-full p-2.5 bg-white border border-indigo-200 rounded-xl text-xs font-semibold text-slate-800 focus:ring-2 ring-indigo-500/10 focus:outline-none"
+                          >
+                            <option value="">-- Pilih Kat. 2 --</option>
+                            {SHUTTERSTOCK_CATEGORIES.map(cat => (
+                              <option key={cat} value={cat}>{cat}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="text-[9px] font-bold uppercase text-red-600 block mb-1">Adobe Stock Kat.</label>
+                          <select
+                            value={editData?.adobeCategory || ''}
+                            onChange={(e) => setEditData((p: any) => p ? {...p, adobeCategory: e.target.value} : null)}
+                            className="w-full p-2.5 bg-white border border-indigo-200 rounded-xl text-xs font-semibold text-slate-800 focus:ring-2 ring-indigo-500/10 focus:outline-none"
+                          >
+                            <option value="">-- Pilih Kat. Adobe --</option>
+                            {ADOBE_CATEGORIES.map(cat => (
+                              <option key={cat} value={cat}>{cat}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        {/* Shutterstock Category 1 */}
+                        <div className="p-3.5 bg-white/60 border border-slate-100 rounded-2xl flex flex-col justify-between space-y-1 shadow-2xs hover:border-amber-200 transition-colors">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[9px] font-black uppercase tracking-wider text-amber-600 flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 inline-block" />
+                              Shutterstock Kat. 1
+                            </span>
+                            <button 
+                              onClick={() => copyToClipboard(selectedImage.metadata!.categories?.[0] || '', 'cat1')} 
+                              className="p-1 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition-colors"
+                              id="btn-copy-cat1"
+                              title="Copy Kategori 1 Shutterstock"
+                            >
+                              {copiedField === 'cat1' ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+                            </button>
+                          </div>
+                          <div className="text-xs font-bold text-slate-800 truncate">
+                            {selectedImage.metadata.categories?.[0] || <span className="text-slate-300 font-normal italic">Belum diset</span>}
+                          </div>
+                        </div>
+
+                        {/* Shutterstock Category 2 */}
+                        <div className="p-3.5 bg-white/60 border border-slate-100 rounded-2xl flex flex-col justify-between space-y-1 shadow-2xs hover:border-amber-200 transition-colors">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[9px] font-black uppercase tracking-wider text-amber-600 flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 inline-block" />
+                              Shutterstock Kat. 2
+                            </span>
+                            <button 
+                              onClick={() => copyToClipboard(selectedImage.metadata!.categories?.[1] || '', 'cat2')} 
+                              className="p-1 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition-colors"
+                              id="btn-copy-cat2"
+                              title="Copy Kategori 2 Shutterstock"
+                            >
+                              {copiedField === 'cat2' ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+                            </button>
+                          </div>
+                          <div className="text-xs font-bold text-slate-800 truncate">
+                            {selectedImage.metadata.categories?.[1] || <span className="text-slate-300 font-normal italic">Belum diset</span>}
+                          </div>
+                        </div>
+
+                        {/* Adobe Stock Category */}
+                        <div className="p-3.5 bg-white/60 border border-slate-100 rounded-2xl flex flex-col justify-between space-y-1 shadow-2xs hover:border-red-200 transition-colors">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[9px] font-black uppercase tracking-wider text-red-600 flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-red-500 inline-block" />
+                              Adobe Stock Kat.
+                            </span>
+                            <button 
+                              onClick={() => copyToClipboard(selectedImage.metadata!.adobeCategory || '', 'adobeCat')} 
+                              className="p-1 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition-colors"
+                              id="btn-copy-adobe-cat"
+                              title="Copy Kategori Adobe Stock"
+                            >
+                              {copiedField === 'adobeCat' ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+                            </button>
+                          </div>
+                          <div className="text-xs font-bold text-slate-800 truncate">
+                            {selectedImage.metadata.adobeCategory || <span className="text-slate-300 font-normal italic">Belum diset</span>}
+                          </div>
+                        </div>
                       </div>
                     )}
                   </div>

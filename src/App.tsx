@@ -32,7 +32,8 @@ import {
   Pause,
   Play,
   Square,
-  AlertTriangle
+  AlertTriangle,
+  Chrome
 } from 'lucide-react';
 import { GoogleGenAI, Type } from "@google/genai";
 import * as piexif from "piexifjs";
@@ -45,6 +46,7 @@ import { TopHeader } from './components/TopHeader';
 import { AssetGrid } from './components/AssetGrid';
 import { MetadataPanel } from './components/MetadataPanel';
 import { BatchDownloadHub } from './components/BatchDownloadHub';
+import { ShutterstockExtensionImporter } from './components/ShutterstockExtensionImporter';
 import { categorizeApiError, maskApiKey } from './lib/errorDiagnostics';
 
 // Import constants and types
@@ -52,6 +54,7 @@ import { MODELS, CHANGELOG_DATA, GROQ_MODELS } from './constants';
 import { ImageData, PngTreeMetadata, Toast, ErrorDiagnostic } from './types';
 
 export default function App() {
+  const [currentPage, setCurrentPage] = useState<'generator' | 'shutterstock_extension'>('generator');
   const [images, setImages] = useState<ImageData[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'standard' | 'pngtree'>('standard');
@@ -364,6 +367,9 @@ export default function App() {
     title: string; 
     description: string; 
     keywords: string;
+    category1?: string;
+    category2?: string;
+    adobeCategory?: string;
     ptMainKeywords?: string;
     ptSecondaryKeywords?: string;
     ptMainCopy?: string;
@@ -399,6 +405,9 @@ export default function App() {
         title: selectedImage.metadata.title,
         description: selectedImage.metadata.description,
         keywords: selectedImage.metadata.keywords.join(', '),
+        category1: selectedImage.metadata.categories?.[0] || '',
+        category2: selectedImage.metadata.categories?.[1] || '',
+        adobeCategory: selectedImage.metadata.adobeCategory || '',
         ptMainKeywords: selectedImage.metadata.pngTree?.mainKeywords.join(', ') || '',
         ptSecondaryKeywords: selectedImage.metadata.pngTree?.secondaryKeywords.join(', ') || '',
         ptMainCopy: selectedImage.metadata.pngTree?.mainCopy || ''
@@ -413,6 +422,12 @@ export default function App() {
       
       const updatedImage = images.find(img => img.id === selectedId);
       if (updatedImage && updatedImage.metadata) {
+        const cat1 = editData.category1 !== undefined ? editData.category1.trim() : (updatedImage.metadata.categories?.[0] || '');
+        const cat2 = editData.category2 !== undefined ? editData.category2.trim() : (updatedImage.metadata.categories?.[1] || '');
+        const categoriesArray = [cat1, cat2].filter(Boolean);
+
+        const adobeCat = editData.adobeCategory !== undefined ? editData.adobeCategory.trim() : (updatedImage.metadata.adobeCategory || '');
+
         const pngTreeData = updatedImage.metadata.pngTree ? {
           title: editData.title,
           mainKeywords: editData.ptMainKeywords ? editData.ptMainKeywords.split(',').map(k => k.trim()).filter(k => k !== '') : updatedImage.metadata.pngTree.mainKeywords,
@@ -427,6 +442,8 @@ export default function App() {
             title: editData.title,
             description: editData.description,
             keywords: keywordsArray,
+            categories: categoriesArray,
+            adobeCategory: adobeCat,
             pngTree: pngTreeData
           }
         };
@@ -801,17 +818,32 @@ export default function App() {
               lastErrorMessage = diag.description || getErrorMessage(error);
               setErrorApiKeys(prev => [...new Set([...prev, currentKey])]);
               
-              setLastRotationWarning({
-                message: `${diag.badge} pada ${maskedKey} (${currentModelName}) → Merotasi ke API Key berikutnya...`,
-                type: diag.type
-              });
+              if (totalKeys > 1) {
+                setLastRotationWarning({
+                  message: `${diag.badge} pada ${maskedKey} (${currentModelName}) → Merotasi ke API Key berikutnya...`,
+                  type: diag.type
+                });
 
-              if (diag.type === 'rate_limit') {
-                addToast(`⚠️ Rate Limit (429) ${maskedKey} → Mencoba Key berikutnya...`, "error");
-              } else if (diag.type === 'model_not_found') {
-                addToast(`⚠️ Model ${currentModelName} tidak tersedia (404) → Rotasi model...`, "error");
-              } else if (diag.type === 'invalid_key') {
-                addToast(`⚠️ ${maskedKey} Tidak Valid → Mencoba Key berikutnya...`, "error");
+                if (diag.type === 'rate_limit') {
+                  addToast(`⚠️ Rate Limit (429) ${maskedKey} → Mencoba Key berikutnya...`, "error");
+                } else if (diag.type === 'model_not_found') {
+                  addToast(`⚠️ Model ${currentModelName} tidak tersedia (404) → Rotasi model...`, "error");
+                } else if (diag.type === 'invalid_key') {
+                  addToast(`⚠️ ${maskedKey} Tidak Valid → Mencoba Key berikutnya...`, "error");
+                }
+              } else {
+                setLastRotationWarning({
+                  message: `${diag.badge} pada ${currentModelName} [1 Key Terdaftar] → Merotasi ke Model berikutnya...`,
+                  type: diag.type
+                });
+
+                if (diag.type === 'rate_limit') {
+                  addToast(`⚠️ Rate Limit (429) pada ${currentModelName} (1 Key) → Rotasi Model...`, "error");
+                } else if (diag.type === 'model_not_found') {
+                  addToast(`⚠️ Model ${currentModelName} tidak tersedia (404) → Rotasi Model...`, "error");
+                } else if (diag.type === 'invalid_key') {
+                  addToast(`⚠️ Key tidak valid → Rotasi Model...`, "error");
+                }
               }
               
               // Try next key for the SAME model
@@ -830,7 +862,9 @@ export default function App() {
             
             if (modelsTried < totalModels) {
               setLastRotationWarning({
-                message: `Semua key gagal pada ${prevModelName} → Mencoba model ${MODELS[modelIndex].name}...`,
+                message: totalKeys > 1 
+                  ? `Semua key gagal pada ${prevModelName} → Mencoba model ${MODELS[modelIndex].name}...`
+                  : `Limit pada ${prevModelName} → Merotasi ke model ${MODELS[modelIndex].name}...`,
                 type: 'model_not_found'
               });
               addToast(`🔄 Rotasi Model: Mencoba ${MODELS[modelIndex].name}`, "info");
@@ -969,10 +1003,17 @@ export default function App() {
               lastDiagnostic = diag;
               lastErrorMessage = diag.description || (error.message || error);
               
-              setLastRotationWarning({
-                message: `${diag.badge} pada ${maskedKey} (${currentModelName}) → Merotasi key...`,
-                type: diag.type
-              });
+              if (totalKeys > 1) {
+                setLastRotationWarning({
+                  message: `${diag.badge} pada ${maskedKey} (${currentModelName}) → Merotasi Groq key...`,
+                  type: diag.type
+                });
+              } else {
+                setLastRotationWarning({
+                  message: `${diag.badge} pada ${currentModelName} [1 Groq Key] → Merotasi ke Model Groq berikutnya...`,
+                  type: diag.type
+                });
+              }
               
               currentKeyIndex++;
               keysTried++;
@@ -988,7 +1029,9 @@ export default function App() {
             
             if (modelsTried < totalModels) {
               setLastRotationWarning({
-                message: `Semua key gagal pada ${prevModelName} → Mencoba model ${GROQ_MODELS[groqModelIndex].name}...`,
+                message: totalKeys > 1 
+                  ? `Semua key gagal pada ${prevModelName} → Mencoba model Groq ${GROQ_MODELS[groqModelIndex].name}...`
+                  : `Limit pada ${prevModelName} → Merotasi ke model Groq ${GROQ_MODELS[groqModelIndex].name}...`,
                 type: 'model_not_found'
               });
               addToast(`🔄 Rotasi Model Groq: Mencoba ${GROQ_MODELS[groqModelIndex].name}`, "info");
@@ -2182,131 +2225,171 @@ export default function App() {
           </AnimatePresence>
 
           <div className="flex-1 overflow-y-auto p-4 sm:p-8 custom-scrollbar pb-24 md:pb-8">
-            <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-6 lg:gap-8 max-w-[1600px] mx-auto">
-              <div className={cn(
-                "transition-all duration-300",
-                activePlatform ? "z-[60] relative" : "z-10 relative"
-              )}>
-                <AssetGrid 
-                  images={images}
-                  selectedId={selectedId}
-                  setSelectedId={setSelectedId}
-                  setImages={setImages}
-                  isDragActive={isDragActive}
-                  viewMode={viewMode}
-                  open={open}
-                  showSettingsPanel={showSettingsPanel}
-                  setShowSettingsPanel={setShowSettingsPanel}
-                  titleLength={titleLength}
-                  setTitleLength={setTitleLength}
-                  keywordCount={keywordCount}
-                  setKeywordCount={setKeywordCount}
-                  titlePreset={titlePreset}
-                  setTitlePreset={setTitlePreset}
-                  styleHint={styleHint}
-                  setStyleHint={setStyleHint}
-                  generateMetadata={generateMetadata}
-                  isGenerating={isGenerating}
-                  isPaused={isPaused}
-                  pauseGeneration={pauseGeneration}
-                  resumeGeneration={resumeGeneration}
-                  stopGeneration={stopGeneration}
-                  startTime={sessionStartTimeRef.current}
-                  currentTime={currentTime}
-                  elapsedBeforePause={elapsedBeforePause}
-                  lastGenerationDuration={lastGenerationDuration}
-                  aiEngine={aiEngine}
-                  setAiEngine={setAiEngine}
-                  groqKeys={groqKeys}
-                  selectedGroqModel={selectedGroqModel}
-                  setSelectedGroqModel={setSelectedGroqModel}
-                  apiKeys={apiKeys}
-                  setShowKeyModal={setShowKeyModal}
-                  selectedModel={selectedModel}
-                  setSelectedModel={setSelectedModel}
-                  autoRotateModel={autoRotateModel}
-                  toggleAutoRotateModel={toggleAutoRotateModel}
-                  autoRotateGroqModel={autoRotateGroqModel}
-                  toggleAutoRotateGroqModel={toggleAutoRotateGroqModel}
-                  autoRetryFailed={autoRetryFailed}
-                  toggleAutoRetryFailed={toggleAutoRetryFailed}
-                  onManualAutoRetry={handleManualAutoRetry}
-                  activeModelDisplay={activeModelDisplay}
-                  activeKeyDisplay={activeKeyDisplay}
-                  currentStatusDetail={currentStatusDetail}
-                  lastRotationWarning={lastRotationWarning}
-                />
+            {/* Page Navigation Tabs */}
+            <div className="flex justify-center mb-6 max-w-xl mx-auto">
+              <div className="bg-slate-100 p-1.5 rounded-2xl flex items-center gap-1.5 border border-slate-200/80 w-full shadow-inner">
+                <button 
+                  onClick={() => setCurrentPage('generator')}
+                  className={cn(
+                    "flex-1 py-2 px-3.5 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 transition-all duration-300",
+                    currentPage === 'generator' 
+                      ? "bg-white text-indigo-600 shadow-md shadow-indigo-100/30 border border-slate-200/30" 
+                      : "text-slate-500 hover:text-slate-800 hover:bg-slate-50/50"
+                  )}
+                  id="tab-generator"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
+                  AI Generator
+                </button>
+
+                <button 
+                  onClick={() => setCurrentPage('shutterstock_extension')}
+                  className={cn(
+                    "flex-1 py-2 px-3.5 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 transition-all duration-300",
+                    currentPage === 'shutterstock_extension' 
+                      ? "bg-white text-indigo-600 shadow-md shadow-indigo-100/30 border border-slate-200/30" 
+                      : "text-slate-500 hover:text-slate-800 hover:bg-slate-50/50"
+                  )}
+                  id="tab-shutterstock-extension"
+                >
+                  <Chrome className="w-3.5 h-3.5 text-indigo-500" />
+                  Ekstensi Shutterstock
+                </button>
               </div>
+            </div>
 
-              <div className="space-y-6">
-                <div ref={downloadHubRef} className={cn(
-                  "transition-all duration-300",
-                  activePlatform ? "z-[999] relative" : "z-20 relative"
-                )}>
-                  <BatchDownloadHub 
-                    images={images}
-                    isGenerating={isGenerating}
-                    isPaused={isPaused}
-                    exportExtension={exportExtension}
-                    setExportExtension={setExportExtension}
-                    isGenerativeAI={isGenerativeAI}
-                    setIsGenerativeAI={setIsGenerativeAI}
-                    aiModel={aiModel}
-                    setAiModel={setAiModel}
-                    downloadCSV={downloadCSV}
-                    downloadAdobeStockCSV={downloadAdobeStockCSV}
-                    downloadShutterstockCSV={downloadShutterstockCSV}
-                    downloadWithMetadata={downloadWithMetadata}
-                    activePlatform={activePlatform}
-                    setActivePlatform={setActivePlatform}
-                    viewMode={viewMode}
-                  />
-                </div>
-
+            {currentPage === 'generator' ? (
+              <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-6 lg:gap-8 max-w-[1600px] mx-auto">
                 <div className={cn(
                   "transition-all duration-300",
-                  activeDownloadMenu ? "z-[99] relative" : "z-10 relative"
+                  activePlatform ? "z-[60] relative" : "z-10 relative"
                 )}>
-                  <MetadataPanel 
-                    selectedImage={selectedImage}
+                  <AssetGrid 
+                    images={images}
+                    selectedId={selectedId}
                     setSelectedId={setSelectedId}
+                    setImages={setImages}
+                    isDragActive={isDragActive}
                     viewMode={viewMode}
-                    setViewMode={setViewMode}
-                    isEditing={isEditing}
-                    setIsEditing={setIsEditing}
-                    startEditing={startEditing}
-                    editData={editData}
-                    setEditData={setEditData}
-                    copyToClipboard={copyToClipboard}
-                    copiedField={copiedField}
-                    saveEdit={saveEdit}
+                    open={open}
+                    showSettingsPanel={showSettingsPanel}
+                    setShowSettingsPanel={setShowSettingsPanel}
+                    titleLength={titleLength}
+                    setTitleLength={setTitleLength}
+                    keywordCount={keywordCount}
+                    setKeywordCount={setKeywordCount}
+                    titlePreset={titlePreset}
+                    setTitlePreset={setTitlePreset}
+                    styleHint={styleHint}
+                    setStyleHint={setStyleHint}
                     generateMetadata={generateMetadata}
                     isGenerating={isGenerating}
-                    selectedModel={aiModel}
-                    regenerateSingleMetadata={regenerateSingleMetadata}
-                    activeDownloadMenu={activeDownloadMenu}
-                    setActiveDownloadMenu={setActiveDownloadMenu}
-                    exportExtension={exportExtension}
-                    setExportExtension={setExportExtension}
-                    downloadCSV={downloadCSV}
-                    isGenerativeAI={isGenerativeAI}
-                    setIsGenerativeAI={setIsGenerativeAI}
-                    aiModel={aiModel}
-                    setAiModel={setAiModel}
-                    downloadAdobeStockCSV={downloadAdobeStockCSV}
-                    downloadShutterstockCSV={downloadShutterstockCSV}
-                    downloadWithMetadata={downloadWithMetadata}
-                    images={images}
-                    addToast={addToast}
-                    onOptimizeMetadata={handleOptimizeMetadata}
+                    isPaused={isPaused}
+                    pauseGeneration={pauseGeneration}
+                    resumeGeneration={resumeGeneration}
+                    stopGeneration={stopGeneration}
+                    startTime={sessionStartTimeRef.current}
+                    currentTime={currentTime}
+                    elapsedBeforePause={elapsedBeforePause}
+                    lastGenerationDuration={lastGenerationDuration}
+                    aiEngine={aiEngine}
+                    setAiEngine={setAiEngine}
+                    groqKeys={groqKeys}
+                    selectedGroqModel={selectedGroqModel}
+                    setSelectedGroqModel={setSelectedGroqModel}
+                    apiKeys={apiKeys}
+                    setShowKeyModal={setShowKeyModal}
+                    selectedModel={selectedModel}
+                    setSelectedModel={setSelectedModel}
+                    autoRotateModel={autoRotateModel}
+                    toggleAutoRotateModel={toggleAutoRotateModel}
+                    autoRotateGroqModel={autoRotateGroqModel}
+                    toggleAutoRotateGroqModel={toggleAutoRotateGroqModel}
+                    autoRetryFailed={autoRetryFailed}
+                    toggleAutoRetryFailed={toggleAutoRetryFailed}
+                    onManualAutoRetry={handleManualAutoRetry}
                     activeModelDisplay={activeModelDisplay}
                     activeKeyDisplay={activeKeyDisplay}
                     currentStatusDetail={currentStatusDetail}
                     lastRotationWarning={lastRotationWarning}
                   />
                 </div>
+
+                <div className="space-y-6">
+                  <div ref={downloadHubRef} className={cn(
+                    "transition-all duration-300",
+                    activePlatform ? "z-[999] relative" : "z-20 relative"
+                  )}>
+                    <BatchDownloadHub 
+                      images={images}
+                      isGenerating={isGenerating}
+                      isPaused={isPaused}
+                      exportExtension={exportExtension}
+                      setExportExtension={setExportExtension}
+                      isGenerativeAI={isGenerativeAI}
+                      setIsGenerativeAI={setIsGenerativeAI}
+                      aiModel={aiModel}
+                      setAiModel={setAiModel}
+                      downloadCSV={downloadCSV}
+                      downloadAdobeStockCSV={downloadAdobeStockCSV}
+                      downloadShutterstockCSV={downloadShutterstockCSV}
+                      downloadWithMetadata={downloadWithMetadata}
+                      activePlatform={activePlatform}
+                      setActivePlatform={setActivePlatform}
+                      viewMode={viewMode}
+                    />
+                  </div>
+
+                  <div className={cn(
+                    "transition-all duration-300",
+                    activeDownloadMenu ? "z-[99] relative" : "z-10 relative"
+                  )}>
+                    <MetadataPanel 
+                      selectedImage={selectedImage}
+                      setSelectedId={setSelectedId}
+                      viewMode={viewMode}
+                      setViewMode={setViewMode}
+                      isEditing={isEditing}
+                      setIsEditing={setIsEditing}
+                      startEditing={startEditing}
+                      editData={editData}
+                      setEditData={setEditData}
+                      copyToClipboard={copyToClipboard}
+                      copiedField={copiedField}
+                      saveEdit={saveEdit}
+                      generateMetadata={generateMetadata}
+                      isGenerating={isGenerating}
+                      selectedModel={aiModel}
+                      regenerateSingleMetadata={regenerateSingleMetadata}
+                      activeDownloadMenu={activeDownloadMenu}
+                      setActiveDownloadMenu={setActiveDownloadMenu}
+                      exportExtension={exportExtension}
+                      setExportExtension={setExportExtension}
+                      downloadCSV={downloadCSV}
+                      isGenerativeAI={isGenerativeAI}
+                      setIsGenerativeAI={setIsGenerativeAI}
+                      aiModel={aiModel}
+                      setAiModel={setAiModel}
+                      downloadAdobeStockCSV={downloadAdobeStockCSV}
+                      downloadShutterstockCSV={downloadShutterstockCSV}
+                      downloadWithMetadata={downloadWithMetadata}
+                      images={images}
+                      addToast={addToast}
+                      onOptimizeMetadata={handleOptimizeMetadata}
+                      activeModelDisplay={activeModelDisplay}
+                      activeKeyDisplay={activeKeyDisplay}
+                      currentStatusDetail={currentStatusDetail}
+                      lastRotationWarning={lastRotationWarning}
+                    />
+                  </div>
+                </div>
               </div>
-            </div>
+            ) : (
+              <ShutterstockExtensionImporter
+                images={images}
+                addToast={addToast}
+              />
+            )}
           </div>
         </div>
       </main>
@@ -2370,6 +2453,19 @@ export default function App() {
 
                 {activeKeyTab === 'gemini' ? (
                   <>
+                    <div className="p-2.5 bg-indigo-50 border border-indigo-100 rounded-2xl flex items-center gap-2 text-[11px] font-medium text-indigo-900">
+                      <Sparkles className="w-4 h-4 text-indigo-600 shrink-0" />
+                      <span>
+                        {apiKeys.length > 1 ? (
+                          <>Terdeteksi <strong>{apiKeys.length} API Keys</strong>. Fitur Auto-Rotate aktif untuk <strong>Model & API Key</strong>.</>
+                        ) : apiKeys.length === 1 ? (
+                          <>Terdeteksi <strong>1 API Key</strong>. Fitur Auto-Rotate aktif untuk <strong>Model saja</strong> (bebas macet limit kuota).</>
+                        ) : (
+                          <>Belum ada API Key. Tambahkan minimal 1 API key untuk memulai.</>
+                        )}
+                      </span>
+                    </div>
+
                     <div className="space-y-2">
                       <div className="flex gap-2">
                         <textarea 
@@ -2470,6 +2566,19 @@ export default function App() {
                   </>
                 ) : (
                   <>
+                    <div className="p-2.5 bg-pink-50 border border-pink-100 rounded-2xl flex items-center gap-2 text-[11px] font-medium text-pink-900">
+                      <Sparkles className="w-4 h-4 text-pink-600 shrink-0" />
+                      <span>
+                        {groqKeys.length > 1 ? (
+                          <>Terdeteksi <strong>{groqKeys.length} Groq Keys</strong>. Fitur Auto-Rotate aktif untuk <strong>Model & API Key Groq</strong>.</>
+                        ) : groqKeys.length === 1 ? (
+                          <>Terdeteksi <strong>1 Groq Key</strong>. Fitur Auto-Rotate aktif untuk <strong>Model Groq saja</strong>.</>
+                        ) : (
+                          <>Belum ada Groq API Key. Tambahkan minimal 1 key untuk mulai.</>
+                        )}
+                      </span>
+                    </div>
+
                     <div className="space-y-2">
                       <div className="flex gap-2">
                         <textarea 
