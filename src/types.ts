@@ -35,6 +35,8 @@ export interface ImageData {
     usedModel: string;
     usedApiKey: string;
     pngTree?: PngTreeMetadata;
+    editorialRecommendation?: 'editorial' | 'commercial';
+    editorialReasoning?: string;
   };
   error?: string;
   errorDiagnostic?: ErrorDiagnostic;

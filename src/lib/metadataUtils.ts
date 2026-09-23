@@ -86,6 +86,14 @@ Generate the following metadata in JSON format:
    - "pngTreeSecondaryKeywords": Exactly 20 unique tags describing style, elements, and usage.
    - "pngTreeMainCopy": Primary text present in the image (if any) or relevant non-English keywords (e.g. Indonesian/Malay/Spanish terms).
 
+7. "editorialRecommendation": Recommendation for stock license type. Must be either "commercial" or "editorial".
+   - Set to "commercial" if the image does not contain any recognizable people without model releases, trademarked logos, brands, trademarked products/characters, or private property.
+   - Set to "editorial" if the image contains any recognizable brand logos (e.g., Apple, Nike, Starbucks, Coca-Cola), recognizable trademarked products (e.g., iPhone, Barbie doll, Lego bricks), celebrity likenesses, public crowds, public street scenes with logos/license plates, or other intellectual properties.
+
+8. "editorialReasoning": A brief, professional, and clear explanation of the recommendation in Indonesian (Bahasa Indonesia).
+   - E.g., for commercial: "Gambar ini aman untuk lisensi Komersial karena tidak mengandung logo brand, properti berhak cipta, atau wajah orang yang membutuhkan model release."
+   - E.g., for editorial: "Gambar ini mengandung objek dengan logo brand Apple yang terlihat jelas, sehingga direkomendasikan untuk lisensi Editorial."
+
 CRITICAL CONSTRAINTS:
 - DO NOT use banned stock clutter words: "oriental", "png", "download", "free", "stock", "high quality", "buy".
 - SHUTTERSTOCK CHARACTER RESTRICTION: NEVER use characters '>', '<', '/', '&' anywhere in title, description, or keywords. Replace '&' with 'and', and use spaces or words instead of slashes '/'. Shutterstock strictly rejects 'Please remove > < / &'.
@@ -155,12 +163,21 @@ export function sanitizeMicrostockMetadata(raw: any, targetKeywordCount = 50) {
     : keywords.slice(0, 20);
   const ptCopy = String(raw.pngTreeMainCopy || '').trim();
 
+  // Editorial vs Commercial License Recommendation extraction
+  const editorialRecommendation = (raw.editorialRecommendation === 'editorial' || raw.editorialRecommendation === 'commercial')
+    ? raw.editorialRecommendation
+    : 'commercial';
+  
+  const editorialReasoning = String(raw.editorialReasoning || 'Gambar ini direkomendasikan untuk lisensi Komersial karena bebas dari logo, merek dagang, atau properti berhak cipta.').trim();
+
   return {
     title,
     description,
     keywords,
     categories,
     adobeCategory,
+    editorialRecommendation,
+    editorialReasoning,
     pngTree: {
       title,
       mainKeywords: ptMain,

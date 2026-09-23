@@ -422,6 +422,66 @@ export function MetadataPanel({
               
               {viewMode === 'standard' ? (
                 <>
+                  {/* License Recommendation Card / Edit Fields */}
+                  {isEditing ? (
+                    <div className="p-4 bg-indigo-50/40 border border-indigo-100/80 rounded-2xl space-y-3 mb-2">
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <ShieldCheck className="w-4 h-4 text-indigo-600" />
+                        <span className="text-[10px] uppercase font-black text-indigo-700 tracking-wider">Rekomendasi Lisensi AI</span>
+                      </div>
+                      <div className="grid grid-cols-1 gap-3">
+                        <div>
+                          <label className="text-[9px] font-bold uppercase text-slate-500 block mb-1">Jenis Lisensi</label>
+                          <select
+                            value={editData?.editorialRecommendation || 'commercial'}
+                            onChange={(e) => setEditData((p: any) => p ? {...p, editorialRecommendation: e.target.value} : null)}
+                            className="w-full p-2.5 bg-white border border-indigo-200 rounded-xl text-xs font-semibold text-slate-800 focus:ring-2 ring-indigo-500/10 focus:outline-none"
+                          >
+                            <option value="commercial">KOMERSIAL (Commercial)</option>
+                            <option value="editorial">EDITORIAL (Editorial)</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-[9px] font-bold uppercase text-slate-500 block mb-1">Alasan Penilaian</label>
+                          <textarea
+                            rows={2}
+                            value={editData?.editorialReasoning || ''}
+                            onChange={(e) => setEditData((p: any) => p ? {...p, editorialReasoning: e.target.value} : null)}
+                            placeholder="Alasan mengapa gambar dikategorikan komersial atau editorial..."
+                            className="w-full p-2.5 bg-white border border-indigo-200 rounded-xl text-xs font-semibold text-slate-800 focus:ring-2 ring-indigo-500/10 focus:outline-none resize-none"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="p-4 bg-slate-50 border border-slate-200/60 rounded-2xl space-y-3 mb-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <ShieldCheck className={cn(
+                            "w-4 h-4",
+                            selectedImage.metadata.editorialRecommendation === 'editorial' ? "text-amber-500" : "text-emerald-500"
+                          )} />
+                          <span className="text-[10px] uppercase font-black text-slate-500 tracking-wider">Rekomendasi Lisensi</span>
+                        </div>
+                        <span className={cn(
+                          "text-[9px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider border",
+                          selectedImage.metadata.editorialRecommendation === 'editorial' 
+                            ? "bg-amber-50 text-amber-700 border-amber-200" 
+                            : "bg-emerald-50 text-emerald-700 border-emerald-200"
+                        )}>
+                          {selectedImage.metadata.editorialRecommendation === 'editorial' ? 'EDITORIAL' : 'KOMERSIAL'}
+                        </span>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <div className="text-[9px] text-slate-400 font-bold uppercase tracking-tight">Analisis AI & Alasan:</div>
+                        <p className="text-xs text-slate-600 leading-relaxed bg-white p-3 rounded-xl border border-slate-100/80 font-medium">
+                          {selectedImage.metadata.editorialReasoning || 'Gambar ini direkomendasikan untuk lisensi Komersial karena bebas dari logo, merek dagang, atau properti berhak cipta.'}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Title Field */}
                   <div className="space-y-2">
                     <div className="flex justify-between items-center">

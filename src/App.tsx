@@ -410,7 +410,9 @@ export default function App() {
         adobeCategory: selectedImage.metadata.adobeCategory || '',
         ptMainKeywords: selectedImage.metadata.pngTree?.mainKeywords.join(', ') || '',
         ptSecondaryKeywords: selectedImage.metadata.pngTree?.secondaryKeywords.join(', ') || '',
-        ptMainCopy: selectedImage.metadata.pngTree?.mainCopy || ''
+        ptMainCopy: selectedImage.metadata.pngTree?.mainCopy || '',
+        editorialRecommendation: selectedImage.metadata.editorialRecommendation || 'commercial',
+        editorialReasoning: selectedImage.metadata.editorialReasoning || ''
       });
       setIsEditing(true);
     }
@@ -444,6 +446,8 @@ export default function App() {
             keywords: keywordsArray,
             categories: categoriesArray,
             adobeCategory: adobeCat,
+            editorialRecommendation: editData.editorialRecommendation || 'commercial',
+            editorialReasoning: editData.editorialReasoning || '',
             pngTree: pngTreeData
           }
         };
@@ -764,9 +768,11 @@ export default function App() {
                       adobeCategory: { type: Type.STRING },
                       pngTreeMainKeywords: { type: Type.ARRAY, items: { type: Type.STRING } },
                       pngTreeSecondaryKeywords: { type: Type.ARRAY, items: { type: Type.STRING } },
-                      pngTreeMainCopy: { type: Type.STRING }
+                      pngTreeMainCopy: { type: Type.STRING },
+                      editorialRecommendation: { type: Type.STRING },
+                      editorialReasoning: { type: Type.STRING }
                     },
-                    required: ["title", "description", "keywords", "categories", "adobeCategory", "pngTreeMainKeywords", "pngTreeSecondaryKeywords", "pngTreeMainCopy"]
+                    required: ["title", "description", "keywords", "categories", "adobeCategory", "pngTreeMainKeywords", "pngTreeSecondaryKeywords", "pngTreeMainCopy", "editorialRecommendation", "editorialReasoning"]
                   }
                 }
               });
@@ -784,6 +790,8 @@ export default function App() {
                 keywords: sanitized.keywords,
                 categories: sanitized.categories,
                 adobeCategory: sanitized.adobeCategory,
+                editorialRecommendation: sanitized.editorialRecommendation as any,
+                editorialReasoning: sanitized.editorialReasoning,
                 prompt: promptText,
                 model: currentModelId,
                 usedModel: MODELS[modelIndex].name,
@@ -969,6 +977,8 @@ export default function App() {
                 keywords: sanitized.keywords,
                 categories: sanitized.categories,
                 adobeCategory: sanitized.adobeCategory,
+                editorialRecommendation: sanitized.editorialRecommendation as any,
+                editorialReasoning: sanitized.editorialReasoning,
                 prompt: promptText,
                 model: currentModelId,
                 usedModel: "Groq " + (
@@ -1187,9 +1197,11 @@ export default function App() {
                     adobeCategory: { type: Type.STRING },
                     pngTreeMainKeywords: { type: Type.ARRAY, items: { type: Type.STRING } },
                     pngTreeSecondaryKeywords: { type: Type.ARRAY, items: { type: Type.STRING } },
-                    pngTreeMainCopy: { type: Type.STRING }
+                    pngTreeMainCopy: { type: Type.STRING },
+                    editorialRecommendation: { type: Type.STRING },
+                    editorialReasoning: { type: Type.STRING }
                   },
-                  required: ["title", "description", "keywords", "categories", "adobeCategory", "pngTreeMainKeywords", "pngTreeSecondaryKeywords", "pngTreeMainCopy"]
+                  required: ["title", "description", "keywords", "categories", "adobeCategory", "pngTreeMainKeywords", "pngTreeSecondaryKeywords", "pngTreeMainCopy", "editorialRecommendation", "editorialReasoning"]
                 }
               }
             });
@@ -1204,6 +1216,8 @@ export default function App() {
               keywords: sanitized.keywords,
               categories: sanitized.categories,
               adobeCategory: sanitized.adobeCategory,
+              editorialRecommendation: sanitized.editorialRecommendation as any,
+              editorialReasoning: sanitized.editorialReasoning,
               prompt: promptText,
               model: currentModelId,
               usedModel: MODELS[modelIndex].name,
@@ -1298,6 +1312,8 @@ export default function App() {
               keywords: sanitized.keywords,
               categories: sanitized.categories,
               adobeCategory: sanitized.adobeCategory,
+              editorialRecommendation: sanitized.editorialRecommendation as any,
+              editorialReasoning: sanitized.editorialReasoning,
               prompt: promptText,
               model: currentModelId,
               usedModel: "Groq " + (
@@ -1478,9 +1494,11 @@ export default function App() {
                     adobeCategory: { type: Type.STRING },
                     pngTreeMainKeywords: { type: Type.ARRAY, items: { type: Type.STRING } },
                     pngTreeSecondaryKeywords: { type: Type.ARRAY, items: { type: Type.STRING } },
-                    pngTreeMainCopy: { type: Type.STRING }
+                    pngTreeMainCopy: { type: Type.STRING },
+                    editorialRecommendation: { type: Type.STRING },
+                    editorialReasoning: { type: Type.STRING }
                   },
-                  required: ["title", "description", "keywords", "categories", "adobeCategory", "pngTreeMainKeywords", "pngTreeSecondaryKeywords", "pngTreeMainCopy"]
+                  required: ["title", "description", "keywords", "categories", "adobeCategory", "pngTreeMainKeywords", "pngTreeSecondaryKeywords", "pngTreeMainCopy", "editorialRecommendation", "editorialReasoning"]
                 }
               }
             });
@@ -1498,6 +1516,8 @@ export default function App() {
               keywords: sanitized.keywords,
               categories: sanitized.categories,
               adobeCategory: sanitized.adobeCategory,
+              editorialRecommendation: sanitized.editorialRecommendation as any,
+              editorialReasoning: sanitized.editorialReasoning,
               prompt: promptText,
               model: currentModelId,
               usedModel: MODELS[modelIndex].name,
@@ -1641,6 +1661,8 @@ export default function App() {
               keywords: sanitized.keywords,
               categories: sanitized.categories,
               adobeCategory: sanitized.adobeCategory,
+              editorialRecommendation: sanitized.editorialRecommendation as any,
+              editorialReasoning: sanitized.editorialReasoning,
               prompt: promptText,
               model: currentModelId,
               usedModel: "Groq " + (
@@ -1818,7 +1840,7 @@ export default function App() {
         `"${description.replace(/"/g, '""')}"`,
         `"${cleanKeywords.replace(/"/g, '""')}"`,
         `"${(img.metadata!.categories || ["Miscellaneous"]).join(',').replace(/"/g, '""')}"`,
-        "No", // Editorial
+        img.metadata!.editorialRecommendation === 'editorial' ? "Yes" : "No", // Editorial
         "No", // Mature content
         isIllustration // Illustration
       ];
