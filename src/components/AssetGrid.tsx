@@ -741,86 +741,101 @@ export function AssetGrid({
           </div>
           
           <div className="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-4 xl:grid-cols-5 gap-2.5">
-            {images.map((img) => (
-              <div
-                key={img.id}
-                id={`image-item-${img.id}`}
-                className={cn(
-                  "group relative aspect-square rounded-xl overflow-hidden border-2 transition-all cursor-pointer shadow-sm",
-                  selectedId === img.id ? "border-indigo-500 ring-4 ring-indigo-50 scale-105 z-10" : "border-white bg-white/50 hover:border-indigo-200"
-                )}
-                onClick={() => setSelectedId(img.id)}
-              >
-                {img.file.type.startsWith('image/') ? (
-                  <div className={cn(
-                    "w-full h-full relative",
-                    (viewMode === 'pngtree' || img.file.type === 'image/png') && "bg-transparency-pattern"
-                  )}>
-                    <img src={img.preview} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                  </div>
-                ) : (
-                  <div className="w-full h-full bg-slate-50 flex items-center justify-center text-slate-300">
-                    <FileText className="w-5 h-5" />
-                  </div>
-                )}
-                
-                {/* Trash/Delete Button POJOK KANAN BAWAH */}
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setImages(prev => prev.filter(i => i.id !== img.id));
-                    if (selectedId === img.id) setSelectedId(null);
-                  }}
-                  className="absolute bottom-1 right-1 p-1 bg-red-500/90 rounded-lg shadow-sm text-white opacity-0 group-hover:opacity-100 transition-opacity z-20 hover:bg-red-600"
+            {images.map((img) => {
+              const isEditorial = img.status === 'completed' && img.metadata?.editorialRecommendation === 'editorial';
+              return (
+                <div
+                  key={img.id}
+                  id={`image-item-${img.id}`}
+                  className={cn(
+                    "group relative aspect-square rounded-xl overflow-hidden border-2 transition-all cursor-pointer shadow-sm",
+                    selectedId === img.id 
+                      ? "border-indigo-500 ring-4 ring-indigo-50 scale-105 z-10" 
+                      : isEditorial
+                        ? "border-amber-300/80 bg-amber-50/10 hover:border-amber-400"
+                        : "border-white bg-white/50 hover:border-indigo-200"
+                  )}
+                  onClick={() => setSelectedId(img.id)}
                 >
-                  <X className="w-3 h-3" />
-                </button>
+                  {img.file.type.startsWith('image/') ? (
+                    <div className={cn(
+                      "w-full h-full relative",
+                      (viewMode === 'pngtree' || img.file.type === 'image/png') && "bg-transparency-pattern"
+                    )}>
+                      <img src={img.preview} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                    </div>
+                  ) : (
+                    <div className="w-full h-full bg-slate-50 flex items-center justify-center text-slate-300">
+                      <FileText className="w-5 h-5" />
+                    </div>
+                  )}
 
-                {/* Status Overlay */}
-                <div className="absolute top-1 left-1 p-0.5 flex flex-col items-start gap-1 pointer-events-none max-w-[90%]">
-                  {img.status === 'completed' && (
-                    <div className="flex items-center gap-1">
-                      <div className="w-5 h-5 bg-green-500 rounded-full flex items-center justify-center shadow-lg border-2 border-white">
-                        <Check className="w-3 h-3 text-white" />
-                      </div>
-                      {img.processingTime && (
-                        <div className="px-1.5 py-0.5 bg-green-500/90 backdrop-blur-sm text-[6px] text-white font-black rounded-full border border-white/20">
-                          {formatProcessingTime(img.processingTime)}
+                  {/* Editorial Badge */}
+                  {isEditorial && (
+                    <div className="absolute top-1 right-1 px-1.5 py-0.5 bg-amber-500/95 backdrop-blur-xs text-[7.5px] text-white font-extrabold tracking-wider rounded-md border border-amber-400/30 shadow-xs z-10 flex items-center gap-1">
+                      <span className="w-1 h-1 rounded-full bg-white animate-pulse shrink-0" />
+                      <span>EDITORIAL</span>
+                    </div>
+                  )}
+                  
+                  {/* Trash/Delete Button POJOK KANAN BAWAH */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setImages(prev => prev.filter(i => i.id !== img.id));
+                      if (selectedId === img.id) setSelectedId(null);
+                    }}
+                    className="absolute bottom-1 right-1 p-1 bg-red-500/90 rounded-lg shadow-sm text-white opacity-0 group-hover:opacity-100 transition-opacity z-20 hover:bg-red-600"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+
+                  {/* Status Overlay */}
+                  <div className="absolute top-1 left-1 p-0.5 flex flex-col items-start gap-1 pointer-events-none max-w-[90%]">
+                    {img.status === 'completed' && (
+                      <div className="flex items-center gap-1">
+                        <div className="w-5 h-5 bg-green-500 rounded-full flex items-center justify-center shadow-lg border-2 border-white">
+                          <Check className="w-3 h-3 text-white" />
                         </div>
-                      )}
-                    </div>
-                  )}
-                  {img.status === 'processing' && (
-                    <div className="flex flex-col items-start gap-1">
-                      <div className="w-5 h-5 bg-indigo-500 rounded-full flex items-center justify-center shadow-lg border-2 border-white animate-pulse">
-                        <Loader2 className="w-3 h-3 text-white animate-spin" />
+                        {img.processingTime && (
+                          <div className="px-1.5 py-0.5 bg-green-500/90 backdrop-blur-sm text-[6px] text-white font-black rounded-full border border-white/20">
+                            {formatProcessingTime(img.processingTime)}
+                          </div>
+                        )}
                       </div>
-                      {(img.activeModel || activeModelDisplay) && (
-                        <div className="px-1.5 py-0.5 bg-indigo-900/90 backdrop-blur-md text-[7px] text-white font-bold rounded-md shadow border border-white/20 truncate max-w-[85px]">
-                          {(img.activeModel || activeModelDisplay)?.split(' ')[0]} {img.activeKey || activeKeyDisplay || ''}
+                    )}
+                    {img.status === 'processing' && (
+                      <div className="flex flex-col items-start gap-1">
+                        <div className="w-5 h-5 bg-indigo-500 rounded-full flex items-center justify-center shadow-lg border-2 border-white animate-pulse">
+                          <Loader2 className="w-3 h-3 text-white animate-spin" />
                         </div>
-                      )}
-                    </div>
-                  )}
-                  {img.status === 'error' && (
-                    <div className="flex flex-col items-start gap-1">
-                      <div className="w-5 h-5 bg-red-500 rounded-full flex items-center justify-center shadow-lg border-2 border-white">
-                        <AlertCircle className="w-3 h-3 text-white" />
+                        {(img.activeModel || activeModelDisplay) && (
+                          <div className="px-1.5 py-0.5 bg-indigo-900/90 backdrop-blur-md text-[7px] text-white font-bold rounded-md shadow border border-white/20 truncate max-w-[85px]">
+                            {(img.activeModel || activeModelDisplay)?.split(' ')[0]} {img.activeKey || activeKeyDisplay || ''}
+                          </div>
+                        )}
                       </div>
-                      <div className="px-1.5 py-0.5 bg-red-600/90 backdrop-blur-md text-[7px] text-white font-black rounded-md shadow border border-white/20 uppercase tracking-tighter truncate max-w-[85px]">
-                        {img.errorDiagnostic?.badge || 'Error'}
+                    )}
+                    {img.status === 'error' && (
+                      <div className="flex flex-col items-start gap-1">
+                        <div className="w-5 h-5 bg-red-500 rounded-full flex items-center justify-center shadow-lg border-2 border-white">
+                          <AlertCircle className="w-3 h-3 text-white" />
+                        </div>
+                        <div className="px-1.5 py-0.5 bg-red-600/90 backdrop-blur-md text-[7px] text-white font-black rounded-md shadow border border-white/20 uppercase tracking-tighter truncate max-w-[85px]">
+                          {img.errorDiagnostic?.badge || 'Error'}
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    )}
+                  </div>
+
+                  {/* Hover effect */}
+                  <div className={cn(
+                    "absolute inset-0 bg-indigo-600/10 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center",
+                    selectedId === img.id && "opacity-100"
+                  )} />
                 </div>
-
-                {/* Hover effect */}
-                <div className={cn(
-                  "absolute inset-0 bg-indigo-600/10 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center",
-                  selectedId === img.id && "opacity-100"
-                )} />
-              </div>
-            ))}
+              );
+            })}
           </div>
 
         </div>
