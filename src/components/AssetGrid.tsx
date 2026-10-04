@@ -743,6 +743,7 @@ export function AssetGrid({
           <div className="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-4 xl:grid-cols-5 gap-2.5">
             {images.map((img) => {
               const isEditorial = img.status === 'completed' && img.metadata?.editorialRecommendation === 'editorial';
+              const isAiSuspected = img.status === 'completed' && Boolean(img.metadata?.isAiSuspected);
               return (
                 <div
                   key={img.id}
@@ -751,9 +752,13 @@ export function AssetGrid({
                     "group relative aspect-square rounded-xl overflow-hidden border-2 transition-all cursor-pointer shadow-sm",
                     selectedId === img.id 
                       ? "border-indigo-500 ring-4 ring-indigo-50 scale-105 z-10" 
-                      : isEditorial
+                      : isEditorial && isAiSuspected
                         ? "border-amber-300/80 bg-amber-50/10 hover:border-amber-400"
-                        : "border-white bg-white/50 hover:border-indigo-200"
+                        : isEditorial
+                          ? "border-amber-300/80 bg-amber-50/10 hover:border-amber-400"
+                          : isAiSuspected
+                            ? "border-purple-300/80 bg-purple-50/10 hover:border-purple-400"
+                            : "border-white bg-white/50 hover:border-indigo-200"
                   )}
                   onClick={() => setSelectedId(img.id)}
                 >
@@ -770,13 +775,24 @@ export function AssetGrid({
                     </div>
                   )}
 
-                  {/* Editorial Badge */}
-                  {isEditorial && (
-                    <div className="absolute top-1 right-1 px-1.5 py-0.5 bg-amber-500/95 backdrop-blur-xs text-[7.5px] text-white font-extrabold tracking-wider rounded-md border border-amber-400/30 shadow-xs z-10 flex items-center gap-1">
-                      <span className="w-1 h-1 rounded-full bg-white animate-pulse shrink-0" />
-                      <span>EDITORIAL</span>
-                    </div>
-                  )}
+                  {/* Top-Right Badges Container */}
+                  <div className="absolute top-1 right-1 flex flex-col items-end gap-1 z-10 pointer-events-none">
+                    {/* Editorial Badge */}
+                    {isEditorial && (
+                      <div className="px-1.5 py-0.5 bg-amber-500/95 backdrop-blur-xs text-[7.5px] text-white font-extrabold tracking-wider rounded-md border border-amber-400/30 shadow-xs flex items-center gap-1">
+                        <span className="w-1 h-1 rounded-full bg-white animate-pulse shrink-0" />
+                        <span>EDITORIAL</span>
+                      </div>
+                    )}
+
+                    {/* AI Suspected Badge */}
+                    {isAiSuspected && (
+                      <div className="px-1.5 py-0.5 bg-purple-600/95 backdrop-blur-xs text-[7.5px] text-white font-extrabold tracking-wider rounded-md border border-purple-400/30 shadow-xs flex items-center gap-1">
+                        <Sparkles className="w-2 h-2 text-purple-200 animate-pulse shrink-0" />
+                        <span>DICURIGAI AI</span>
+                      </div>
+                    )}
+                  </div>
                   
                   {/* Trash/Delete Button POJOK KANAN BAWAH */}
                   <button

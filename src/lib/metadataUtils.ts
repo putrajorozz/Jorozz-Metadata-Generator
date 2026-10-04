@@ -94,7 +94,16 @@ Generate the following metadata in JSON format:
    - E.g., for commercial: "Gambar ini aman untuk lisensi Komersial karena tidak mengandung logo brand, properti berhak cipta, atau wajah orang yang membutuhkan model release."
    - E.g., for editorial: "Gambar ini mengandung objek dengan logo brand Apple yang terlihat jelas, sehingga direkomendasikan untuk lisensi Editorial."
 
+9. "isAiSuspected": boolean. AI Generation Detection Indicator.
+   - Set to true if the image clearly exhibits visual characteristics, synthetic noise patterns, hyper-smooth diffusion textures, unnatural anatomical anomalies (e.g. malformed hands/fingers/teeth), plastic glossiness, or telltale Generative AI generation artifacts.
+   - Set to false if the image appears to be an authentic camera photograph, authentic hand-crafted drawing, vector graphic, or real human artwork.
+
+10. "aiDetectionReasoning": A brief and insightful explanation in Indonesian (Bahasa Indonesia) explaining why the visual appears to be AI-generated or authentic/natural.
+   - E.g., if AI: "Terdeteksi karakteristik AI berupa tekstur kulit yang terlalu mulus (airbrushed), pencahayaan difusi sintetik, dan detail latar belakang yang sedikit mengalami distorsi."
+   - E.g., if Not AI: "Gambar menunjukkan tekstur optik kamera natural, grain sensor alami, dan tidak ditemukan artefak khas model difusi AI."
+
 CRITICAL CONSTRAINTS:
+- STRICT METADATA ISOLATION: DO NOT include words like "AI", "AI generated", "generative ai", or "synthetic" in the "title", "description", or "keywords" fields. The AI detection status is purely for diagnostic badge indicator and must NOT contaminate stock search metadata.
 - DO NOT use banned stock clutter words: "oriental", "png", "download", "free", "stock", "high quality", "buy".
 - SHUTTERSTOCK CHARACTER RESTRICTION: NEVER use characters '>', '<', '/', '&' anywhere in title, description, or keywords. Replace '&' with 'and', and use spaces or words instead of slashes '/'. Shutterstock strictly rejects 'Please remove > < / &'.
 - Return raw JSON matching the requested fields cleanly.`;
@@ -170,6 +179,18 @@ export function sanitizeMicrostockMetadata(raw: any, targetKeywordCount = 50) {
   
   const editorialReasoning = String(raw.editorialReasoning || 'Gambar ini direkomendasikan untuk lisensi Komersial karena bebas dari logo, merek dagang, atau properti berhak cipta.').trim();
 
+  // AI Detection extraction (For badge & diagnostic only - NOT used in metadata)
+  const isAiSuspected = typeof raw.isAiSuspected === 'boolean' 
+    ? raw.isAiSuspected 
+    : (typeof raw.isAiSuspected === 'string' && (raw.isAiSuspected.toLowerCase() === 'true' || raw.isAiSuspected.toLowerCase() === 'yes'));
+
+  const aiDetectionReasoning = String(
+    raw.aiDetectionReasoning || 
+    (isAiSuspected 
+      ? 'Terindikasi ciri visual khas AI generatif seperti tekstur sintetik, pencahayaan difusi halus, atau detail artistik buatan.' 
+      : 'Tidak ditemukan tanda-tanda visual AI. Gambar tampak seperti foto optik atau ilustrasi grafis autentik.')
+  ).trim();
+
   return {
     title,
     description,
@@ -178,6 +199,8 @@ export function sanitizeMicrostockMetadata(raw: any, targetKeywordCount = 50) {
     adobeCategory,
     editorialRecommendation,
     editorialReasoning,
+    isAiSuspected,
+    aiDetectionReasoning,
     pngTree: {
       title,
       mainKeywords: ptMain,

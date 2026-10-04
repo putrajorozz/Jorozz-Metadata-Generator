@@ -57,6 +57,10 @@ interface MetadataPanelProps {
     ptMainKeywords?: string;
     ptSecondaryKeywords?: string;
     ptMainCopy?: string;
+    editorialRecommendation?: 'editorial' | 'commercial';
+    editorialReasoning?: string;
+    isAiSuspected?: boolean;
+    aiDetectionReasoning?: string;
   } | null;
   setEditData: (data: any) => void;
   copyToClipboard: (text: string, field: string) => void;
@@ -424,60 +428,147 @@ export function MetadataPanel({
                 <>
                   {/* License Recommendation Card / Edit Fields */}
                   {isEditing ? (
-                    <div className="p-4 bg-indigo-50/40 border border-indigo-100/80 rounded-2xl space-y-3 mb-2">
-                      <div className="flex items-center gap-1.5 mb-1">
-                        <ShieldCheck className="w-4 h-4 text-indigo-600" />
-                        <span className="text-[10px] uppercase font-black text-indigo-700 tracking-wider">Rekomendasi Lisensi AI</span>
-                      </div>
-                      <div className="grid grid-cols-1 gap-3">
-                        <div>
-                          <label className="text-[9px] font-bold uppercase text-slate-500 block mb-1">Jenis Lisensi</label>
-                          <select
-                            value={editData?.editorialRecommendation || 'commercial'}
-                            onChange={(e) => setEditData((p: any) => p ? {...p, editorialRecommendation: e.target.value} : null)}
-                            className="w-full p-2.5 bg-white border border-indigo-200 rounded-xl text-xs font-semibold text-slate-800 focus:ring-2 ring-indigo-500/10 focus:outline-none"
-                          >
-                            <option value="commercial">KOMERSIAL (Commercial)</option>
-                            <option value="editorial">EDITORIAL (Editorial)</option>
-                          </select>
+                    <div className="space-y-3 mb-3">
+                      {/* License Edit */}
+                      <div className="p-4 bg-indigo-50/40 border border-indigo-100/80 rounded-2xl space-y-3">
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <ShieldCheck className="w-4 h-4 text-indigo-600" />
+                          <span className="text-[10px] uppercase font-black text-indigo-700 tracking-wider">Rekomendasi Lisensi AI</span>
                         </div>
-                        <div>
-                          <label className="text-[9px] font-bold uppercase text-slate-500 block mb-1">Alasan Penilaian</label>
-                          <textarea
-                            rows={2}
-                            value={editData?.editorialReasoning || ''}
-                            onChange={(e) => setEditData((p: any) => p ? {...p, editorialReasoning: e.target.value} : null)}
-                            placeholder="Alasan mengapa gambar dikategorikan komersial atau editorial..."
-                            className="w-full p-2.5 bg-white border border-indigo-200 rounded-xl text-xs font-semibold text-slate-800 focus:ring-2 ring-indigo-500/10 focus:outline-none resize-none"
-                          />
+                        <div className="grid grid-cols-1 gap-3">
+                          <div>
+                            <label className="text-[9px] font-bold uppercase text-slate-500 block mb-1">Jenis Lisensi</label>
+                            <select
+                              value={editData?.editorialRecommendation || 'commercial'}
+                              onChange={(e) => setEditData((p: any) => p ? {...p, editorialRecommendation: e.target.value} : null)}
+                              className="w-full p-2.5 bg-white border border-indigo-200 rounded-xl text-xs font-semibold text-slate-800 focus:ring-2 ring-indigo-500/10 focus:outline-none"
+                            >
+                              <option value="commercial">KOMERSIAL (Commercial)</option>
+                              <option value="editorial">EDITORIAL (Editorial)</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="text-[9px] font-bold uppercase text-slate-500 block mb-1">Alasan Penilaian Lisensi</label>
+                            <textarea
+                              rows={2}
+                              value={editData?.editorialReasoning || ''}
+                              onChange={(e) => setEditData((p: any) => p ? {...p, editorialReasoning: e.target.value} : null)}
+                              placeholder="Alasan mengapa gambar dikategorikan komersial atau editorial..."
+                              className="w-full p-2.5 bg-white border border-indigo-200 rounded-xl text-xs font-semibold text-slate-800 focus:ring-2 ring-indigo-500/10 focus:outline-none resize-none"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* AI Detection Edit */}
+                      <div className="p-4 bg-purple-50/40 border border-purple-100/80 rounded-2xl space-y-3">
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <Sparkles className="w-4 h-4 text-purple-600" />
+                          <span className="text-[10px] uppercase font-black text-purple-700 tracking-wider">Pendeteksi AI (Status & Catatan)</span>
+                        </div>
+                        <div className="grid grid-cols-1 gap-3">
+                          <div>
+                            <label className="text-[9px] font-bold uppercase text-slate-500 block mb-1">Status Deteksi AI</label>
+                            <select
+                              value={editData?.isAiSuspected ? "yes" : "no"}
+                              onChange={(e) => setEditData((p: any) => p ? {...p, isAiSuspected: e.target.value === "yes"} : null)}
+                              className="w-full p-2.5 bg-white border border-purple-200 rounded-xl text-xs font-semibold text-slate-800 focus:ring-2 ring-purple-500/10 focus:outline-none"
+                            >
+                              <option value="yes">DICURIGAI AI (Tampilkan Badge "DICURIGAI AI")</option>
+                              <option value="no">TIDAK TERDETEKSI AI / NATURAL</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="text-[9px] font-bold uppercase text-slate-500 block mb-1">Alasan / Catatan Deteksi AI</label>
+                            <textarea
+                              rows={2}
+                              value={editData?.aiDetectionReasoning || ''}
+                              onChange={(e) => setEditData((p: any) => p ? {...p, aiDetectionReasoning: e.target.value} : null)}
+                              placeholder="Alasan mengapa gambar dicurigai AI atau dinilai foto/karya natural..."
+                              className="w-full p-2.5 bg-white border border-purple-200 rounded-xl text-xs font-semibold text-slate-800 focus:ring-2 ring-purple-500/10 focus:outline-none resize-none"
+                            />
+                          </div>
                         </div>
                       </div>
                     </div>
                   ) : (
-                    <div className="p-4 bg-slate-50 border border-slate-200/60 rounded-2xl space-y-3 mb-2">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-1.5">
-                          <ShieldCheck className={cn(
-                            "w-4 h-4",
-                            selectedImage.metadata.editorialRecommendation === 'editorial' ? "text-amber-500" : "text-emerald-500"
-                          )} />
-                          <span className="text-[10px] uppercase font-black text-slate-500 tracking-wider">Rekomendasi Lisensi</span>
+                    <div className="space-y-2 mb-3">
+                      {/* AI Detection Diagnostic Card */}
+                      <div className={cn(
+                        "p-4 rounded-2xl border space-y-2.5 transition-colors",
+                        selectedImage.metadata.isAiSuspected
+                          ? "bg-purple-50/70 border-purple-200/80 shadow-xs"
+                          : "bg-slate-50/80 border-slate-200/60"
+                      )}>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5">
+                            <Sparkles className={cn(
+                              "w-4 h-4",
+                              selectedImage.metadata.isAiSuspected ? "text-purple-600" : "text-slate-400"
+                            )} />
+                            <span className="text-[10px] uppercase font-black text-slate-600 tracking-wider">Pendeteksi Gambar AI</span>
+                          </div>
+                          <span className={cn(
+                            "text-[9px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider border flex items-center gap-1",
+                            selectedImage.metadata.isAiSuspected 
+                              ? "bg-purple-600 text-white border-purple-500 shadow-xs" 
+                              : "bg-slate-100 text-slate-600 border-slate-200"
+                          )}>
+                            {selectedImage.metadata.isAiSuspected ? (
+                              <>
+                                <span className="w-1.5 h-1.5 rounded-full bg-purple-200 animate-pulse" />
+                                DICURIGAI AI
+                              </>
+                            ) : (
+                              <>
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                                TIDAK TERDETEKSI AI (NATURAL)
+                              </>
+                            )}
+                          </span>
                         </div>
-                        <span className={cn(
-                          "text-[9px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider border",
-                          selectedImage.metadata.editorialRecommendation === 'editorial' 
-                            ? "bg-amber-50 text-amber-700 border-amber-200" 
-                            : "bg-emerald-50 text-emerald-700 border-emerald-200"
-                        )}>
-                          {selectedImage.metadata.editorialRecommendation === 'editorial' ? 'EDITORIAL' : 'KOMERSIAL'}
-                        </span>
+
+                        <div className="space-y-1">
+                          <div className="text-[9px] text-slate-400 font-bold uppercase tracking-tight flex items-center justify-between">
+                            <span>Hasil Analisis & Indikasi:</span>
+                            <span className="text-[7.5px] font-normal text-slate-400 italic">Hanya verifikasi, tidak masuk metadata</span>
+                          </div>
+                          <p className="text-xs text-slate-600 leading-relaxed bg-white p-3 rounded-xl border border-slate-100/80 font-medium">
+                            {selectedImage.metadata.aiDetectionReasoning || (
+                              selectedImage.metadata.isAiSuspected
+                                ? "Terindikasi ciri visual khas AI generatif seperti tekstur sintetik, pencahayaan difusi halus, atau detail artistik buatan."
+                                : "Tidak ditemukan tanda-tanda visual AI. Gambar tampak seperti foto optik atau karya seni grafis autentik."
+                            )}
+                          </p>
+                        </div>
                       </div>
 
-                      <div className="space-y-1.5">
-                        <div className="text-[9px] text-slate-400 font-bold uppercase tracking-tight">Analisis AI & Alasan:</div>
-                        <p className="text-xs text-slate-600 leading-relaxed bg-white p-3 rounded-xl border border-slate-100/80 font-medium">
-                          {selectedImage.metadata.editorialReasoning || 'Gambar ini direkomendasikan untuk lisensi Komersial karena bebas dari logo, merek dagang, atau properti berhak cipta.'}
-                        </p>
+                      {/* License Recommendation Card */}
+                      <div className="p-4 bg-slate-50 border border-slate-200/60 rounded-2xl space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5">
+                            <ShieldCheck className={cn(
+                              "w-4 h-4",
+                              selectedImage.metadata.editorialRecommendation === 'editorial' ? "text-amber-500" : "text-emerald-500"
+                            )} />
+                            <span className="text-[10px] uppercase font-black text-slate-500 tracking-wider">Rekomendasi Lisensi</span>
+                          </div>
+                          <span className={cn(
+                            "text-[9px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider border",
+                            selectedImage.metadata.editorialRecommendation === 'editorial' 
+                              ? "bg-amber-50 text-amber-700 border-amber-200" 
+                              : "bg-emerald-50 text-emerald-700 border-emerald-200"
+                          )}>
+                            {selectedImage.metadata.editorialRecommendation === 'editorial' ? 'EDITORIAL' : 'KOMERSIAL'}
+                          </span>
+                        </div>
+
+                        <div className="space-y-1">
+                          <div className="text-[9px] text-slate-400 font-bold uppercase tracking-tight">Analisis Lisensi & Alasan:</div>
+                          <p className="text-xs text-slate-600 leading-relaxed bg-white p-3 rounded-xl border border-slate-100/80 font-medium">
+                            {selectedImage.metadata.editorialReasoning || 'Gambar ini direkomendasikan untuk lisensi Komersial karena bebas dari logo, merek dagang, atau properti berhak cipta.'}
+                          </p>
+                        </div>
                       </div>
                     </div>
                   )}

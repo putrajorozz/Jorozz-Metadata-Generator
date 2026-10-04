@@ -37,6 +37,8 @@ export interface ImageData {
     pngTree?: PngTreeMetadata;
     editorialRecommendation?: 'editorial' | 'commercial';
     editorialReasoning?: string;
+    isAiSuspected?: boolean;
+    aiDetectionReasoning?: string;
   };
   error?: string;
   errorDiagnostic?: ErrorDiagnostic;
