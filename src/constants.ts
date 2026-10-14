@@ -5,16 +5,91 @@ export const MODAL_TYPE = {
 };
 
 export const MODELS = [
-  { id: "gemini-3.1-flash-lite", name: "Gemini 3.1 Flash Lite (Gratisan/Hemat Kuota)", description: "Paling hemat kuota, efisien & sangat cepat" },
-  { id: "gemini-3.5-flash-lite", name: "Gemini 3.5 Flash Lite (Gratisan/Hemat Kuota)", description: "Sangat cepat & efisien dengan konsumsi kuota sangat rendah" },
-  { id: "gemini-flash-lite-latest", name: "Gemini Flash Lite Latest (Gratisan/Hemat Kuota)", description: "Model Flash Lite default versi terbaru, sangat ramah limit" },
-  { id: "gemini-3-flash-preview", name: "Gemini 3 Flash Preview (Gratisan)", description: "Model Gemini 3 Flash versi preview yang efisien" },
-  { id: "gemini-flash-latest", name: "Gemini Flash Latest (Hemat Kuota)", description: "Model Flash default versi terbaru, seimbang dan cepat" },
-  { id: "gemini-3.7-flash", name: "Gemini 3.7 Flash", description: "Model generasi 3.7 Flash paling mutakhir, sangat cerdas & responsif" },
-  { id: "gemini-3.6-flash", name: "Gemini 3.6 Flash", description: "Model generasi 3.6 Flash terbaru dengan performa tinggi" },
-  { id: "gemini-3.5-flash", name: "Gemini 3.5 Flash", description: "Seimbang antara performa akurat dan kecepatan optimal" },
-  { id: "gemini-3.1-pro-preview", name: "Gemini 3.1 Pro Preview (Kapasitas Tinggi)", description: "Penalaran kuat & pemahaman konteks mendalam (Konsumsi kuota lebih tinggi)" },
-  { id: "gemini-pro-latest", name: "Gemini Pro Latest (Kapasitas Tinggi)", description: "Model Pro default dengan kemampuan penalaran tinggi" },
+  // 1. KELOMPOK GRATISAN / SUPER HEMAT KUOTA (Flash Lite Series)
+  { 
+    id: "gemini-3.1-flash-lite", 
+    name: "Gemini 3.1 Flash Lite", 
+    badge: "Gratis (Paling Hemat)", 
+    badgeType: "free-saver" as const,
+    category: "Hemat Kuota",
+    description: "Paling hemat kuota (RPM/RPD tertinggi), sangat ramah limit & super cepat" 
+  },
+  { 
+    id: "gemini-3.5-flash-lite", 
+    name: "Gemini 3.5 Flash Lite", 
+    badge: "Gratis (Hemat Kuota)", 
+    badgeType: "free-saver" as const,
+    category: "Hemat Kuota",
+    description: "Sangat cepat & efisiensi kuota tinggi dengan konsumsi token minimal" 
+  },
+  { 
+    id: "gemini-flash-lite-latest", 
+    name: "Gemini Flash Lite Latest", 
+    badge: "Gratis (Lite Terbaru)", 
+    badgeType: "free-saver" as const,
+    category: "Hemat Kuota",
+    description: "Model Flash Lite default otomatis versi terbaru dari Google" 
+  },
+
+  // 2. KELOMPOK GRATISAN / GENERASI TERBARU (Flash Series Mutakhir)
+  { 
+    id: "gemini-3.8-flash", 
+    name: "Gemini 3.8 Flash", 
+    badge: "Gratis (Terbaru)", 
+    badgeType: "free-latest" as const,
+    category: "Generasi Terbaru",
+    description: "Generasi 3.8 Flash paling mutakhir, sangat cerdas, visual tajam & gratis tier" 
+  },
+  { 
+    id: "gemini-flash-latest", 
+    name: "Gemini Flash Latest", 
+    badge: "Gratis (Default Terbaru)", 
+    badgeType: "free-latest" as const,
+    category: "Generasi Terbaru",
+    description: "Model Flash default versi terbaru Google, performa seimbang & cepat" 
+  },
+  { 
+    id: "gemini-3.7-flash", 
+    name: "Gemini 3.7 Flash", 
+    badge: "Gratis", 
+    badgeType: "free" as const,
+    category: "Flash Standard",
+    description: "Model generasi 3.7 Flash cerdas, responsif & akurat membaca detail visual" 
+  },
+  { 
+    id: "gemini-3.6-flash", 
+    name: "Gemini 3.6 Flash", 
+    badge: "Gratis", 
+    badgeType: "free" as const,
+    category: "Flash Standard",
+    description: "Model generasi 3.6 Flash cepat dengan tingkat akurasi tinggi" 
+  },
+  { 
+    id: "gemini-3.5-flash", 
+    name: "Gemini 3.5 Flash", 
+    badge: "Gratis", 
+    badgeType: "free" as const,
+    category: "Flash Standard",
+    description: "Model Flash stabil dan seimbang untuk pemrosesan batch gambar" 
+  },
+
+  // 3. KELOMPOK KAPASITAS TINGGI / PRO (Penalaran Kompleks)
+  { 
+    id: "gemini-3.1-pro-preview", 
+    name: "Gemini 3.1 Pro Preview", 
+    badge: "Pro / Kapasitas Tinggi", 
+    badgeType: "pro" as const,
+    category: "Pro / Kapasitas Tinggi",
+    description: "Penalaran visual mendalam & detail tingkat lanjut (konsumsi kuota lebih tinggi)" 
+  },
+  { 
+    id: "gemini-pro-latest", 
+    name: "Gemini Pro Latest", 
+    badge: "Pro / Kapasitas Tinggi", 
+    badgeType: "pro" as const,
+    category: "Pro / Kapasitas Tinggi",
+    description: "Model Pro default dengan kemampuan analisis dan logika tertinggi" 
+  },
 ];
 
 export const GROQ_MODELS = [
@@ -23,6 +98,25 @@ export const GROQ_MODELS = [
 ];
 
 export const CHANGELOG_DATA = [
+  {
+    id: "v1.4.0",
+    date: "14 Oktober 2026",
+    title: "Update Model Gemini Terbaru & Prioritas Gratis",
+    changes: [
+      { type: "new", text: "Menambahkan model Gemini 3.8 Flash generasi terbaru yang sangat cerdas & responsif." },
+      { type: "improvement", text: "Urutan model diprioritaskan mulai dari model gratisan & hemat kuota (Flash Lite series) ke generasi terbaru, lalu Pro series." },
+      { type: "new", text: "Label badge status gratisan/hemat kuota pada pilihan model untuk kemudahan kontributor." }
+    ]
+  },
+  {
+    id: "v1.3.0",
+    date: "10 Oktober 2026",
+    title: "Pendeteksi AI Visual & Indikator Khusus Editorial",
+    changes: [
+      { type: "new", text: "Fitur Pendeteksi AI murni (Visual AI Detection) dengan badge 'DICURIGAI AI' tanpa mengotori metadata microstock." },
+      { type: "new", text: "Badge pembeda khusus EDITORIAL pada daftar gambar dan analisis alasan lisensi." }
+    ]
+  },
   {
     id: "v1.2.0",
     date: "7 April 2026",

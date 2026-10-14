@@ -67,7 +67,11 @@ export default function App() {
   const sessionStartTimeRef = useRef<number | null>(null);
   const [progress, setProgress] = useState(0);
   const [copiedField, setCopiedField] = useState<string | null>(null);
-  const [selectedModel, setSelectedModel] = useState(MODELS[0].id);
+  const [selectedModel, setSelectedModel] = useState<string>(() => {
+    const favorite = localStorage.getItem('favorite_model_id');
+    if (favorite && MODELS.some(m => m.id === favorite)) return favorite;
+    return MODELS[0].id;
+  });
   const [keywordCount, setKeywordCount] = useState(50);
   const [titleLength, setTitleLength] = useState(100);
   const [isGenerativeAI, setIsGenerativeAI] = useState(false);
