@@ -135,6 +135,92 @@ export function MetadataPanel({
     return calculateSeoScore(selectedImage.metadata, selectedImage.file.type === 'image/png');
   }, [selectedImage?.metadata, selectedImage?.file?.type]);
 
+  const platformLimits = useMemo(() => {
+    if (!selectedImage?.metadata) return null;
+
+    const currentTitle = isEditing ? (editData?.title ?? '') : (selectedImage.metadata.title ?? '');
+    const currentDesc = isEditing ? (editData?.description ?? '') : (selectedImage.metadata.description ?? '');
+    const currentKeywords = isEditing
+      ? (editData?.keywords ?? '').split(',').map(k => k.trim()).filter(Boolean)
+      : (selectedImage.metadata.keywords ?? []);
+
+    const titleLen = currentTitle.length;
+    const descLen = currentDesc.length;
+    const kwCount = currentKeywords.length;
+
+    const seen = new Set<string>();
+    let duplicateCount = 0;
+    for (const kw of currentKeywords) {
+      const norm = kw.toLowerCase();
+      if (seen.has(norm)) duplicateCount++;
+      else seen.add(norm);
+    }
+
+    const titleWarnings: { platform: string; message: string; severity: 'warning' | 'error' }[] = [];
+    if (titleLen > 200) {
+      titleWarnings.push({
+        platform: 'Adobe Stock / Shutterstock / Dreamstime',
+        message: `Melebihi batas 200 karakter (${titleLen}/200). Judul terlalu panjang.`,
+        severity: 'error'
+      });
+    }
+    if (titleLen > 100) {
+      titleWarnings.push({
+        platform: 'Freepik / Magnific',
+        message: `Melebihi batas 100 karakter (${titleLen}/100). Akan terpotong otomatis saat ekspor.`,
+        severity: 'warning'
+      });
+    }
+
+    const descWarnings: { platform: string; message: string; severity: 'warning' | 'error' }[] = [];
+    if (descLen > 200) {
+      descWarnings.push({
+        platform: 'Shutterstock / Dreamstime',
+        message: `Melebihi batas 200 karakter (${descLen}/200).`,
+        severity: 'warning'
+      });
+    }
+
+    const keywordWarnings: { platform: string; message: string; severity: 'warning' | 'error' }[] = [];
+    if (kwCount > 50) {
+      keywordWarnings.push({
+        platform: 'Adobe Stock / Shutterstock / Freepik',
+        message: `Melebihi batas maksimal 50 kata kunci (${kwCount}/50).`,
+        severity: 'error'
+      });
+    } else if (isGenerativeAI && kwCount > 49) {
+      keywordWarnings.push({
+        platform: 'Freepik AI',
+        message: `Mode AI Generated Freepik maksimal 49 kata kunci (${kwCount}/49). Akan terpotong saat ekspor.`,
+        severity: 'warning'
+      });
+    }
+    if (kwCount > 0 && kwCount < 5) {
+      keywordWarnings.push({
+        platform: 'SEO Microstock',
+        message: `Kata kunci terlalu sedikit (${kwCount}). Minimal 5–7 kata kunci disarankan.`,
+        severity: 'warning'
+      });
+    }
+    if (duplicateCount > 0) {
+      keywordWarnings.push({
+        platform: 'Duplikat',
+        message: `Terdeteksi ${duplicateCount} kata kunci duplikat.`,
+        severity: 'warning'
+      });
+    }
+
+    return {
+      titleLen,
+      descLen,
+      kwCount,
+      duplicateCount,
+      titleWarnings,
+      descWarnings,
+      keywordWarnings
+    };
+  }, [selectedImage?.metadata, isEditing, editData?.title, editData?.description, editData?.keywords, isGenerativeAI]);
+
   // Intelligent Format Recommendation
   const formatRecommendation = (() => {
     if (!selectedImage) return '.png';
@@ -576,7 +662,21 @@ export function MetadataPanel({
                   {/* Title Field */}
                   <div className="space-y-2">
                     <div className="flex justify-between items-center">
-                      <label className="text-[10px] uppercase font-bold text-indigo-600 tracking-wider">Judul</label>
+                      <div className="flex items-center gap-2">
+                        <label className="text-[10px] uppercase font-bold text-indigo-600 tracking-wider">Judul</label>
+                        {platformLimits && (
+                          <span className={cn(
+                            "text-[10px] font-bold px-2 py-0.5 rounded-full border",
+                            platformLimits.titleLen > 200
+                              ? "bg-red-50 text-red-600 border-red-200"
+                              : platformLimits.titleLen > 100
+                                ? "bg-amber-50 text-amber-700 border-amber-200"
+                                : "bg-slate-100 text-slate-500 border-slate-200"
+                          )}>
+                            {platformLimits.titleLen} karakter
+                          </span>
+                        )}
+                      </div>
                       {!isEditing && (
                         <button onClick={() => copyToClipboard(selectedImage.metadata!.title, 'title')} className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400" id="btn-copy-title">
                           {copiedField === 'title' ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
@@ -587,11 +687,38 @@ export function MetadataPanel({
                       <input 
                         value={editData?.title || ''}
                         onChange={(e) => setEditData((p: any) => p ? {...p, title: e.target.value} : null)}
-                        className="w-full p-3 bg-white border border-indigo-200 rounded-xl text-sm focus:ring-2 ring-indigo-500/10 focus:outline-none"
+                        className={cn(
+                          "w-full p-3 bg-white border rounded-xl text-sm focus:ring-2 focus:outline-none transition-colors",
+                          platformLimits && platformLimits.titleLen > 200
+                            ? "border-red-300 ring-red-500/10"
+                            : platformLimits && platformLimits.titleLen > 100
+                              ? "border-amber-300 ring-amber-500/10"
+                              : "border-indigo-200 ring-indigo-500/10"
+                        )}
                       />
                     ) : (
                       <div className="p-4 bg-white/60 border border-slate-100 rounded-2xl text-slate-800 font-medium text-sm">
                         {selectedImage.metadata.title}
+                      </div>
+                    )}
+                    {platformLimits && platformLimits.titleWarnings.length > 0 && (
+                      <div className="space-y-1">
+                        {platformLimits.titleWarnings.map((w, idx) => (
+                          <div
+                            key={idx}
+                            className={cn(
+                              "flex items-start gap-1.5 px-2.5 py-1.5 rounded-xl text-[11px] font-medium border",
+                              w.severity === 'error'
+                                ? "bg-red-50/80 text-red-700 border-red-200/80"
+                                : "bg-amber-50/80 text-amber-800 border-amber-200/80"
+                            )}
+                          >
+                            <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                            <span>
+                              <strong className="font-bold">{w.platform}:</strong> {w.message}
+                            </span>
+                          </div>
+                        ))}
                       </div>
                     )}
                   </div>
@@ -599,7 +726,19 @@ export function MetadataPanel({
                   {/* Description Field */}
                   <div className="space-y-2">
                     <div className="flex justify-between items-center">
-                      <label className="text-[10px] uppercase font-bold text-indigo-600 tracking-wider">Deskripsi</label>
+                      <div className="flex items-center gap-2">
+                        <label className="text-[10px] uppercase font-bold text-indigo-600 tracking-wider">Deskripsi</label>
+                        {platformLimits && (
+                          <span className={cn(
+                            "text-[10px] font-bold px-2 py-0.5 rounded-full border",
+                            platformLimits.descLen > 200
+                              ? "bg-amber-50 text-amber-700 border-amber-200"
+                              : "bg-slate-100 text-slate-500 border-slate-200"
+                          )}>
+                            {platformLimits.descLen} karakter
+                          </span>
+                        )}
+                      </div>
                       {!isEditing && (
                         <button onClick={() => copyToClipboard(selectedImage.metadata!.description, 'desc')} className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400" id="btn-copy-desc">
                           {copiedField === 'desc' ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
@@ -611,11 +750,31 @@ export function MetadataPanel({
                         rows={3}
                         value={editData?.description || ''}
                         onChange={(e) => setEditData((p: any) => p ? {...p, description: e.target.value} : null)}
-                        className="w-full p-3 bg-white border border-indigo-200 rounded-xl text-sm focus:ring-2 ring-indigo-500/10 focus:outline-none resize-none"
+                        className={cn(
+                          "w-full p-3 bg-white border rounded-xl text-sm focus:ring-2 focus:outline-none resize-none transition-colors",
+                          platformLimits && platformLimits.descLen > 200
+                            ? "border-amber-300 ring-amber-500/10"
+                            : "border-indigo-200 ring-indigo-500/10"
+                        )}
                       />
                     ) : (
                       <div className="p-4 bg-white/60 border border-slate-100 rounded-2xl text-slate-600 text-sm leading-relaxed">
                         {selectedImage.metadata.description}
+                      </div>
+                    )}
+                    {platformLimits && platformLimits.descWarnings.length > 0 && (
+                      <div className="space-y-1">
+                        {platformLimits.descWarnings.map((w, idx) => (
+                          <div
+                            key={idx}
+                            className="flex items-start gap-1.5 px-2.5 py-1.5 rounded-xl text-[11px] font-medium border bg-amber-50/80 text-amber-800 border-amber-200/80"
+                          >
+                            <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                            <span>
+                              <strong className="font-bold">{w.platform}:</strong> {w.message}
+                            </span>
+                          </div>
+                        ))}
                       </div>
                     )}
                   </div>
@@ -623,7 +782,23 @@ export function MetadataPanel({
                   {/* Keywords Field */}
                   <div className="space-y-2">
                     <div className="flex justify-between items-center">
-                      <label className="text-[10px] uppercase font-bold text-indigo-600 tracking-wider">Kata Kunci ({selectedImage.metadata.keywords.length})</label>
+                      <div className="flex items-center gap-2">
+                        <label className="text-[10px] uppercase font-bold text-indigo-600 tracking-wider">
+                          Kata Kunci ({platformLimits ? platformLimits.kwCount : selectedImage.metadata.keywords.length})
+                        </label>
+                        {platformLimits && (
+                          <span className={cn(
+                            "text-[10px] font-bold px-2 py-0.5 rounded-full border",
+                            platformLimits.kwCount > 50
+                              ? "bg-red-50 text-red-600 border-red-200"
+                              : (isGenerativeAI && platformLimits.kwCount > 49) || platformLimits.duplicateCount > 0
+                                ? "bg-amber-50 text-amber-700 border-amber-200"
+                                : "bg-slate-100 text-slate-500 border-slate-200"
+                          )}>
+                            Maks {isGenerativeAI ? '49 (AI) / 50' : '50'}
+                          </span>
+                        )}
+                      </div>
                       {!isEditing && (
                         <button onClick={() => copyToClipboard(selectedImage.metadata!.keywords.join(', '), 'keys')} className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400" id="btn-copy-keys">
                           {copiedField === 'keys' ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
@@ -636,7 +811,14 @@ export function MetadataPanel({
                         value={editData?.keywords || ''}
                         onChange={(e) => setEditData((p: any) => p ? {...p, keywords: e.target.value} : null)}
                         placeholder="Keywords separated by commas"
-                        className="w-full p-3 bg-white border border-indigo-200 rounded-xl text-sm focus:ring-2 ring-indigo-500/10 focus:outline-none resize-none"
+                        className={cn(
+                          "w-full p-3 bg-white border rounded-xl text-sm focus:ring-2 focus:outline-none resize-none transition-colors",
+                          platformLimits && platformLimits.kwCount > 50
+                            ? "border-red-300 ring-red-500/10"
+                            : platformLimits && ((isGenerativeAI && platformLimits.kwCount > 49) || platformLimits.duplicateCount > 0)
+                              ? "border-amber-300 ring-amber-500/10"
+                              : "border-indigo-200 ring-indigo-500/10"
+                        )}
                       />
                     ) : (
                       <div className="flex flex-wrap gap-2">
@@ -644,6 +826,26 @@ export function MetadataPanel({
                           <span key={i} className="px-3 py-1 bg-white border border-slate-100 rounded-full text-[11px] font-medium text-slate-600 shadow-sm">
                             {k}
                           </span>
+                        ))}
+                      </div>
+                    )}
+                    {platformLimits && platformLimits.keywordWarnings.length > 0 && (
+                      <div className="space-y-1">
+                        {platformLimits.keywordWarnings.map((w, idx) => (
+                          <div
+                            key={idx}
+                            className={cn(
+                              "flex items-start gap-1.5 px-2.5 py-1.5 rounded-xl text-[11px] font-medium border",
+                              w.severity === 'error'
+                                ? "bg-red-50/80 text-red-700 border-red-200/80"
+                                : "bg-amber-50/80 text-amber-800 border-amber-200/80"
+                            )}
+                          >
+                            <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                            <span>
+                              <strong className="font-bold">{w.platform}:</strong> {w.message}
+                            </span>
+                          </div>
                         ))}
                       </div>
                     )}

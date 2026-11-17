@@ -47,10 +47,14 @@ import { AssetGrid } from './components/AssetGrid';
 import { MetadataPanel } from './components/MetadataPanel';
 import { BatchDownloadHub } from './components/BatchDownloadHub';
 import { ShutterstockExtensionImporter } from './components/ShutterstockExtensionImporter';
+import { ApiKeyModal } from './components/ApiKeyModal';
+import { InfoModal } from './components/InfoModal';
 import { categorizeApiError, maskApiKey } from './lib/errorDiagnostics';
+import { exportFreepikCSV, exportAdobeStockCSV, exportShutterstockCSV } from './lib/csvExporters';
+import { useBatchGenerator } from './hooks/useBatchGenerator';
 
 // Import constants and types
-import { MODELS, CHANGELOG_DATA, GROQ_MODELS } from './constants';
+import { MODELS, GROQ_MODELS } from './constants';
 import { ImageData, PngTreeMetadata, Toast, ErrorDiagnostic } from './types';
 
 export default function App() {
@@ -58,14 +62,32 @@ export default function App() {
   const [images, setImages] = useState<ImageData[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'standard' | 'pngtree'>('standard');
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [isPaused, setIsPaused] = useState(false);
-  const isPausedRef = useRef(false);
-  const isCancelledRef = useRef(false);
-  const pausePromiseResolveRef = useRef<(() => void) | null>(null);
-  const [elapsedBeforePause, setElapsedBeforePause] = useState<number>(0);
-  const sessionStartTimeRef = useRef<number | null>(null);
-  const [progress, setProgress] = useState(0);
+  const {
+    isGenerating,
+    setIsGenerating,
+    isPaused,
+    setIsPaused,
+    progress,
+    setProgress,
+    elapsedBeforePause,
+    setElapsedBeforePause,
+    isPausedRef,
+    isCancelledRef,
+    pausePromiseResolveRef,
+    sessionStartTimeRef,
+    lastSuccessKeyIndex,
+    lastSuccessModelIndex,
+    lastSuccessGroqModelIndex,
+    autoRotateModel,
+    toggleAutoRotateModel,
+    autoRotateGroqModel,
+    toggleAutoRotateGroqModel,
+    autoRetryFailed,
+    toggleAutoRetryFailed
+  } = useBatchGenerator({
+    onToast: (message, type) => addToast(message, type)
+  });
+
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState<string>(() => {
     const favorite = localStorage.getItem('favorite_model_id');
@@ -98,53 +120,6 @@ export default function App() {
   const successAudio = useRef<HTMLAudioElement | null>(null);
   const completeAudio = useRef<HTMLAudioElement | null>(null);
   const downloadHubRef = useRef<HTMLDivElement>(null);
-
-  // Persistent state for successful generation pair
-  const lastSuccessKeyIndex = useRef<number>(0);
-  const lastSuccessModelIndex = useRef<number>(0);
-  const lastSuccessGroqModelIndex = useRef<number>(0);
-
-  const [autoRotateModel, setAutoRotateModel] = useState<boolean>(() => {
-    const saved = localStorage.getItem('auto_rotate_model');
-    return saved !== 'false';
-  });
-
-  const toggleAutoRotateModel = () => {
-    setAutoRotateModel(prev => {
-      const next = !prev;
-      localStorage.setItem('auto_rotate_model', JSON.stringify(next));
-      addToast(next ? "Auto-Rotate Gemini Model: AKTIF" : "Auto-Rotate Gemini Model: NONAKTIF", next ? "success" : "info");
-      return next;
-    });
-  };
-
-  const [autoRotateGroqModel, setAutoRotateGroqModel] = useState<boolean>(() => {
-    const saved = localStorage.getItem('auto_rotate_groq_model');
-    return saved !== 'false';
-  });
-
-  const toggleAutoRotateGroqModel = () => {
-    setAutoRotateGroqModel(prev => {
-      const next = !prev;
-      localStorage.setItem('auto_rotate_groq_model', JSON.stringify(next));
-      addToast(next ? "Auto-Rotate Groq Model: AKTIF" : "Auto-Rotate Groq Model: NONAKTIF", next ? "success" : "info");
-      return next;
-    });
-  };
-
-  const [autoRetryFailed, setAutoRetryFailed] = useState<boolean>(() => {
-    const saved = localStorage.getItem('auto_retry_failed');
-    return saved !== 'false';
-  });
-
-  const toggleAutoRetryFailed = () => {
-    setAutoRetryFailed(prev => {
-      const next = !prev;
-      localStorage.setItem('auto_retry_failed', JSON.stringify(next));
-      addToast(next ? "Auto-Retry Gambar Gagal: AKTIF" : "Auto-Retry Gambar Gagal: NONAKTIF", next ? "success" : "info");
-      return next;
-    });
-  };
 
   const [audioVolume, setAudioVolume] = useState<number>(() => {
     const saved = localStorage.getItem('audio_volume');
@@ -382,7 +357,6 @@ export default function App() {
     isAiSuspected?: boolean;
     aiDetectionReasoning?: string;
   } | null>(null);
-  const [expandedLogs, setExpandedLogs] = useState<string[]>([CHANGELOG_DATA[0].id]);
   const [showBulkOptions, setShowBulkOptions] = useState(false);
   const [showSettingsPanel, setShowSettingsPanel] = useState(() => {
     const saved = localStorage.getItem('show_settings_panel');
@@ -400,12 +374,6 @@ export default function App() {
       localStorage.removeItem('favorite_model_id');
     }
   }, [favoriteModelId]);
-
-  const toggleLog = (id: string) => {
-    setExpandedLogs(prev => 
-      prev.includes(id) ? prev.filter(v => v !== id) : [...prev, id]
-    );
-  };
 
   const startEditing = () => {
     if (selectedImage?.metadata) {
@@ -1764,131 +1732,35 @@ export default function App() {
   };
 
   const downloadCSV = (targetImages?: ImageData[]) => {
-    const imagesToExport = targetImages || images.filter(img => img.status === 'completed' && img.metadata);
-    if (imagesToExport.length === 0) return;
-
-    const headers = ["File name", "Title", "Keywords"];
-    if (isGenerativeAI) {
-      headers.push("Prompt", "Model");
-    }
-
-    const rows = imagesToExport.map(img => {
-      // Freepik specific: title max 100 chars
-      let title = img.metadata!.title;
-      if (title.length > 100) {
-        title = title.substring(0, 100);
-      }
-
-      // Freepik specific: if AI generative is on, max 49 keywords
-      let keywordsArray = [...img.metadata!.keywords];
-      if (isGenerativeAI) {
-        keywordsArray = keywordsArray.slice(0, 49);
-      }
-
-      const row = [
-        `"${img.file.name.replace(/"/g, '""')}"`,
-        `"${title.replace(/"/g, '""')}"`,
-        `"${keywordsArray.join(',').replace(/"/g, '""')}"`
-      ];
-      
-      if (isGenerativeAI) {
-        // User wants exactly: filename;title;keywords;"";"Model Name"
-        row.push('""', `"${aiModel.replace(/"/g, '""')}"`);
-      }
-      
-      return row;
+    const { count } = exportFreepikCSV({
+      images: targetImages || images,
+      exportExtension,
+      isGenerativeAI,
+      aiModel
     });
-
-    const csvContent = [headers, ...rows].map(e => e.join(";")).join("\n");
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.setAttribute("href", url);
-    const fileName = imagesToExport.length === 1 
-      ? `freepik_${imagesToExport[0].file.name.split('.')[0]}.csv`
-      : `freepik_bulk_${new Date().toISOString().split('T')[0]}.csv`;
-    link.setAttribute("download", fileName);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    addToast(imagesToExport.length === 1 ? "CSV Gambar Berhasil" : "CSV Bulk Berhasil", "success");
+    if (count > 0) {
+      addToast(count === 1 ? "CSV Freepik/Magnific Berhasil" : "CSV Bulk Freepik/Magnific Berhasil", "success");
+    }
   };
 
   const downloadAdobeStockCSV = (targetImages?: ImageData[]) => {
-    const imagesToExport = targetImages || images.filter(img => img.status === 'completed' && img.metadata);
-    if (imagesToExport.length === 0) return;
-
-    const headers = ["Filename", "Title", "Keywords"];
-    const rows = imagesToExport.map(img => {
-      // Change extension based on user selection
-      const fileNameWithExt = img.file.name.replace(/\.[^/.]+$/, "") + exportExtension;
-      
-      return [
-        fileNameWithExt,
-        `"${img.metadata!.title.replace(/"/g, '""')}"`,
-        `"${img.metadata!.keywords.join(', ').replace(/"/g, '""')}"`
-      ];
+    const { count } = exportAdobeStockCSV({
+      images: targetImages || images,
+      exportExtension
     });
-
-    const csvContent = [headers, ...rows].map(e => e.join(",")).join("\n");
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.setAttribute("href", url);
-    const fileName = imagesToExport.length === 1 
-      ? `adobestock_${imagesToExport[0].file.name.split('.')[0]}.csv`
-      : `adobestock_bulk_${new Date().toISOString().split('T')[0]}.csv`;
-    link.setAttribute("download", fileName);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    addToast(imagesToExport.length === 1 ? "Adobe Stock CSV Berhasil" : "Adobe Stock Bulk Berhasil", "success");
+    if (count > 0) {
+      addToast(count === 1 ? "Adobe Stock CSV Berhasil" : "Adobe Stock Bulk Berhasil", "success");
+    }
   };
 
   const downloadShutterstockCSV = (targetImages?: ImageData[]) => {
-    const imagesToExport = targetImages || images.filter(img => img.status === 'completed' && img.metadata);
-    if (imagesToExport.length === 0) return;
-
-    const headers = ["Filename", "Description", "Keywords", "Categories", "Editorial", "Mature content", "Illustration"];
-    const rows = imagesToExport.map(img => {
-      // Change extension based on user selection
-      const fileNameWithExt = img.file.name.replace(/\.[^/.]+$/, "") + exportExtension;
-      
-      // Illustration is "Yes" only for .eps
-      const isIllustration = exportExtension === '.eps' ? "Yes" : "No";
-      
-      // Use Title as Description if Title exists, as it follow the stricter "human" rules
-      const rawDescription = img.metadata!.title || img.metadata!.description;
-      const description = cleanShutterstockText(rawDescription);
-      const cleanKeywords = img.metadata!.keywords
-        .map(kw => cleanShutterstockText(kw))
-        .filter(Boolean)
-        .join(', ');
-      
-      return [
-        fileNameWithExt,
-        `"${description.replace(/"/g, '""')}"`,
-        `"${cleanKeywords.replace(/"/g, '""')}"`,
-        `"${(img.metadata!.categories || ["Miscellaneous"]).join(',').replace(/"/g, '""')}"`,
-        img.metadata!.editorialRecommendation === 'editorial' ? "Yes" : "No", // Editorial
-        "No", // Mature content
-        isIllustration // Illustration
-      ];
+    const { count } = exportShutterstockCSV({
+      images: targetImages || images,
+      exportExtension
     });
-
-    const csvContent = [headers, ...rows].map(e => e.join(",")).join("\n");
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.setAttribute("href", url);
-    const fileName = imagesToExport.length === 1 
-      ? `shutterstock_${imagesToExport[0].file.name.split('.')[0]}.csv`
-      : `shutterstock_bulk_${new Date().toISOString().split('T')[0]}.csv`;
-    link.setAttribute("download", fileName);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    addToast(imagesToExport.length === 1 ? "Shutterstock CSV Berhasil" : "Shutterstock Bulk Berhasil", "success");
+    if (count > 0) {
+      addToast(count === 1 ? "Shutterstock CSV Berhasil" : "Shutterstock Bulk Berhasil", "success");
+    }
   };
 
   const downloadWithMetadata = async (targetImages?: ImageData[]) => {
@@ -2452,451 +2324,30 @@ export default function App() {
       </main>
     </div>
 
-    {/* API Key Modal */}
-      <AnimatePresence>
-        {showKeyModal && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowKeyModal(false)}
-              className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
-            />
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden"
-            >
-              <div className="p-6 border-b border-slate-100 flex justify-between items-center">
-                <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-                  <Key className="w-5 h-5 text-indigo-500" />
-                  Manage API Keys
-                </h3>
-                <button onClick={() => setShowKeyModal(false)} className="p-2 hover:bg-slate-100 rounded-lg text-slate-400">
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-              
-              <div className="p-6 space-y-4">
-                {/* Tab Switcher inside Modal */}
-                <div className="flex bg-slate-100 p-1 rounded-2xl gap-1">
-                  <button
-                    type="button"
-                    onClick={() => setActiveKeyTab('gemini')}
-                    className={cn(
-                      "flex-1 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all",
-                      activeKeyTab === 'gemini'
-                        ? "bg-white text-indigo-600 shadow-sm"
-                        : "text-slate-500 hover:text-slate-700"
-                    )}
-                  >
-                    Gemini Keys ({apiKeys.length})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setActiveKeyTab('groq')}
-                    className={cn(
-                      "flex-1 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition-all",
-                      activeKeyTab === 'groq'
-                        ? "bg-white text-pink-600 shadow-sm"
-                        : "text-slate-500 hover:text-slate-700"
-                    )}
-                  >
-                    Groq Keys ({groqKeys.length})
-                  </button>
-                </div>
-
-                {activeKeyTab === 'gemini' ? (
-                  <>
-                    <div className="p-2.5 bg-indigo-50 border border-indigo-100 rounded-2xl flex items-center gap-2 text-[11px] font-medium text-indigo-900">
-                      <Sparkles className="w-4 h-4 text-indigo-600 shrink-0" />
-                      <span>
-                        {apiKeys.length > 1 ? (
-                          <>Terdeteksi <strong>{apiKeys.length} API Keys</strong>. Fitur Auto-Rotate aktif untuk <strong>Model & API Key</strong>.</>
-                        ) : apiKeys.length === 1 ? (
-                          <>Terdeteksi <strong>1 API Key</strong>. Fitur Auto-Rotate aktif untuk <strong>Model saja</strong> (bebas macet limit kuota).</>
-                        ) : (
-                          <>Belum ada API Key. Tambahkan minimal 1 API key untuk memulai.</>
-                        )}
-                      </span>
-                    </div>
-
-                    <div className="space-y-2">
-                      <div className="flex gap-2">
-                        <textarea 
-                          placeholder="Masukkan satu atau banyak Gemini API Key (pisahkan dengan baris baru)..."
-                          value={newKey}
-                          onChange={(e) => setNewKey(e.target.value)}
-                          rows={newKey.split('\n').length > 3 ? 5 : 3}
-                          className="flex-1 px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/20 resize-none custom-scrollbar"
-                        />
-                        <div className="flex flex-col justify-end">
-                          <button 
-                            onClick={handleAddKey}
-                            className="p-3 bg-indigo-600 text-white rounded-2xl hover:bg-indigo-700 transition-all hover:shadow-lg active:scale-95"
-                            title="Tambah Key"
-                          >
-                            <Plus className="w-5 h-5" />
-                          </button>
-                        </div>
-                      </div>
-                      <p className="text-[10px] text-slate-400 px-1">
-                        <Info className="w-3 h-3 inline mr-1" />
-                        Bisa memasukkan banyak key / log sekaligus dipisah baris baru (dimulai AIza atau AQ.).
-                      </p>
-                    </div>
-
-                    <div className="space-y-2 max-h-60 overflow-y-auto custom-scrollbar pr-2">
-                      {apiKeys.length === 0 ? (
-                        <p className="text-center text-slate-400 text-sm py-8 font-medium">Belum ada Gemini API Key yang disimpan.</p>
-                      ) : (
-                        apiKeys.map((key, i) => {
-                          const isActive = activeApiKey === key && aiEngine === 'gemini';
-                          const hasError = errorApiKeys.includes(key);
-                          
-                          return (
-                            <div key={i} className={cn(
-                              "flex items-center justify-between p-3 rounded-xl border transition-all",
-                              isActive ? "bg-indigo-50 border-indigo-200 shadow-sm" : 
-                              hasError ? "bg-red-50 border-red-200" :
-                              "bg-slate-50 border-slate-100"
-                            )}>
-                              <div className="flex items-center gap-3 min-w-0">
-                                {isActive ? (
-                                  <Loader2 className="w-4 h-4 text-indigo-500 animate-spin shrink-0" />
-                                ) : hasError ? (
-                                  <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
-                                ) : (
-                                  <Key className="w-4 h-4 text-slate-400 shrink-0" />
-                                )}
-                                <span className={cn(
-                                  "text-xs font-mono truncate max-w-[180px]",
-                                  isActive ? "text-indigo-700 font-bold" : 
-                                  hasError ? "text-red-700" :
-                                  "text-slate-500"
-                                )}>
-                                  {visibleKeys.has(i) ? key : `${key.substring(0, 8)}••••••••${key.substring(key.length - 4)}`}
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-1">
-                                <button 
-                                  onClick={() => {
-                                    navigator.clipboard.writeText(key);
-                                    setCopiedKeys(prev => {
-                                      const next = new Set(prev);
-                                      next.add(i);
-                                      return next;
-                                    });
-                                    setTimeout(() => {
-                                      setCopiedKeys(prev => {
-                                        const next = new Set(prev);
-                                        next.delete(i);
-                                        return next;
-                                      });
-                                    }, 2000);
-                                  }}
-                                  className="p-1.5 hover:bg-slate-200 text-slate-400 rounded-lg transition-colors shrink-0"
-                                  title="Copy API Key"
-                                >
-                                  {copiedKeys.has(i) ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
-                                </button>
-                                <button 
-                                  onClick={() => toggleKeyVisibility(i)}
-                                  className="p-1.5 hover:bg-slate-200 text-slate-400 rounded-lg transition-colors shrink-0"
-                                >
-                                  {visibleKeys.has(i) ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                                </button>
-                                <button 
-                                  onClick={() => removeKey(i)}
-                                  className="p-1.5 hover:bg-red-100 text-red-400 rounded-lg transition-colors shrink-0"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
-                              </div>
-                            </div>
-                          );
-                        })
-                      )}
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div className="p-2.5 bg-pink-50 border border-pink-100 rounded-2xl flex items-center gap-2 text-[11px] font-medium text-pink-900">
-                      <Sparkles className="w-4 h-4 text-pink-600 shrink-0" />
-                      <span>
-                        {groqKeys.length > 1 ? (
-                          <>Terdeteksi <strong>{groqKeys.length} Groq Keys</strong>. Fitur Auto-Rotate aktif untuk <strong>Model & API Key Groq</strong>.</>
-                        ) : groqKeys.length === 1 ? (
-                          <>Terdeteksi <strong>1 Groq Key</strong>. Fitur Auto-Rotate aktif untuk <strong>Model Groq saja</strong>.</>
-                        ) : (
-                          <>Belum ada Groq API Key. Tambahkan minimal 1 key untuk mulai.</>
-                        )}
-                      </span>
-                    </div>
-
-                    <div className="space-y-2">
-                      <div className="flex gap-2">
-                        <textarea 
-                          placeholder="Masukkan satu atau banyak Groq API Key (pisahkan dengan baris baru)..."
-                          value={newGroqKey}
-                          onChange={(e) => setNewGroqKey(e.target.value)}
-                          rows={newGroqKey.split('\n').length > 3 ? 5 : 3}
-                          className="flex-1 px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-mono focus:outline-none focus:ring-2 focus:ring-pink-500/20 resize-none custom-scrollbar"
-                        />
-                        <div className="flex flex-col justify-end">
-                          <button 
-                            onClick={handleAddGroqKey}
-                            className="p-3 bg-pink-600 text-white rounded-2xl hover:bg-pink-700 transition-all hover:shadow-lg active:scale-95"
-                            title="Tambah Groq Key"
-                          >
-                            <Plus className="w-5 h-5" />
-                          </button>
-                        </div>
-                      </div>
-                      <p className="text-[10px] text-slate-400 px-1">
-                        <Info className="w-3 h-3 inline mr-1" />
-                        Bisa memasukkan banyak key sekaligus dipisah baris baru (biasanya diawali gsk_).
-                      </p>
-                    </div>
-
-                    <div className="space-y-2 max-h-60 overflow-y-auto custom-scrollbar pr-2">
-                      {groqKeys.length === 0 ? (
-                        <p className="text-center text-slate-400 text-sm py-8 font-medium">Belum ada Groq API Key yang disimpan.</p>
-                      ) : (
-                        groqKeys.map((key, i) => {
-                          return (
-                            <div key={i} className="flex items-center justify-between p-3 rounded-xl border border-slate-100 bg-slate-50">
-                              <div className="flex items-center gap-3 min-w-0">
-                                <Key className="w-4 h-4 text-pink-500 shrink-0" />
-                                <span className="text-xs font-mono text-slate-500 truncate max-w-[180px]">
-                                  {visibleGroqKeys.has(i) ? key : `${key.substring(0, 8)}••••••••${key.substring(key.length - 4)}`}
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-1">
-                                <button 
-                                  onClick={() => {
-                                    navigator.clipboard.writeText(key);
-                                    setCopiedGroqKeys(prev => {
-                                      const next = new Set(prev);
-                                      next.add(i);
-                                      return next;
-                                    });
-                                    setTimeout(() => {
-                                      setCopiedGroqKeys(prev => {
-                                        const next = new Set(prev);
-                                        next.delete(i);
-                                        return next;
-                                      });
-                                    }, 2000);
-                                  }}
-                                  className="p-1.5 hover:bg-slate-200 text-slate-400 rounded-lg transition-colors shrink-0"
-                                  title="Copy API Key"
-                                >
-                                  {copiedGroqKeys.has(i) ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
-                                </button>
-                                <button 
-                                  onClick={() => {
-                                    setVisibleGroqKeys(prev => {
-                                      const next = new Set(prev);
-                                      if (next.has(i)) next.delete(i);
-                                      else next.add(i);
-                                      return next;
-                                    });
-                                  }}
-                                  className="p-1.5 hover:bg-slate-200 text-slate-400 rounded-lg transition-colors shrink-0"
-                                >
-                                  {visibleGroqKeys.has(i) ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                                </button>
-                                <button 
-                                  onClick={() => handleRemoveGroqKey(i)}
-                                  className="p-1.5 hover:bg-red-100 text-red-300 rounded-lg transition-colors shrink-0"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
-                              </div>
-                            </div>
-                          );
-                        })
-                      )}
-                    </div>
-                  </>
-                )}
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      {/* API Key Modal */}
+      <ApiKeyModal
+        isOpen={showKeyModal}
+        onClose={() => setShowKeyModal(false)}
+        aiEngine={aiEngine}
+        apiKeys={apiKeys}
+        activeApiKey={activeApiKey}
+        errorApiKeys={errorApiKeys}
+        newKey={newKey}
+        setNewKey={setNewKey}
+        onAddKey={handleAddKey}
+        onRemoveKey={removeKey}
+        groqKeys={groqKeys}
+        newGroqKey={newGroqKey}
+        setNewGroqKey={setNewGroqKey}
+        onAddGroqKey={handleAddGroqKey}
+        onRemoveGroqKey={handleRemoveGroqKey}
+      />
 
       {/* Info Page Modal */}
-      <AnimatePresence>
-        {showInfoPage && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowInfoPage(false)}
-              className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
-            />
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="relative w-full max-w-2xl max-h-[85vh] bg-white rounded-3xl shadow-2xl overflow-hidden flex flex-col"
-            >
-              <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-white sticky top-0 z-10">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center">
-                    <Info className="w-5 h-5 text-indigo-600" />
-                  </div>
-                  <div>
-                    <h2 className="text-lg font-bold text-slate-800">Informasi Website</h2>
-                    <p className="text-xs text-slate-500">Panduan fitur AI Metadata Generator</p>
-                  </div>
-                </div>
-                <button 
-                  onClick={() => setShowInfoPage(false)}
-                  className="p-2 hover:bg-slate-100 rounded-xl transition-colors text-slate-400 hover:text-slate-600"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              <div className="p-6 overflow-y-auto space-y-6">
-                <div className="space-y-4">
-                  <div className="flex gap-4">
-                    <div className="w-8 h-8 shrink-0 rounded-full bg-blue-50 flex items-center justify-center mt-1">
-                      <Sparkles className="w-4 h-4 text-blue-600" />
-                    </div>
-                    <div>
-                      <h3 className="text-sm font-bold text-slate-800 mb-1">Generate Metadata Otomatis</h3>
-                      <p className="text-xs text-slate-600 leading-relaxed">
-                        Aplikasi ini menggunakan teknologi AI (Google Gemini) untuk menganalisis gambar Anda dan secara otomatis membuatkan Judul, Deskripsi, serta Kata Kunci (Keywords) yang relevan dan SEO-friendly untuk keperluan microstock.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex gap-4">
-                    <div className="w-8 h-8 shrink-0 rounded-full bg-purple-50 flex items-center justify-center mt-1">
-                      <Key className="w-4 h-4 text-purple-600" />
-                    </div>
-                    <div>
-                      <h3 className="text-sm font-bold text-slate-800 mb-1">Multi API Key (Rotasi)</h3>
-                      <p className="text-xs text-slate-600 leading-relaxed">
-                        Anda dapat memasukkan lebih dari satu Gemini API Key. Sistem akan menggunakan key tersebut secara bergantian untuk menghindari limit (Rate Limit) dan mempercepat proses generate metadata dalam jumlah banyak.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex gap-4">
-                    <div className="w-8 h-8 shrink-0 rounded-full bg-indigo-50 flex items-center justify-center mt-1">
-                      <Layers className="w-4 h-4 text-indigo-600" />
-                    </div>
-                    <div>
-                      <h3 className="text-sm font-bold text-slate-800 mb-1">Auto-Rotate Model AI</h3>
-                      <p className="text-xs text-slate-600 leading-relaxed">
-                        Jika diaktifkan, saat model Gemini utama pilihan Anda mengalami kegagalan/limit (Rate Limit) pada semua API Key yang aktif, sistem akan memutar ke model Gemini alternatif secara dinamis agar seluruh proses batch tetap selesai. Jika dinonaktifkan, sistem hanya menggunakan model utama Anda dan langsung berhenti jika model tersebut limit.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex gap-4">
-                    <div className="w-8 h-8 shrink-0 rounded-full bg-amber-50 flex items-center justify-center mt-1">
-                      <Edit3 className="w-4 h-4 text-amber-600" />
-                    </div>
-                    <div>
-                      <h3 className="text-sm font-bold text-slate-800 mb-1">Edit & Simpan Metadata</h3>
-                      <p className="text-xs text-slate-600 leading-relaxed">
-                        Hasil generate AI tidak selalu sempurna. Anda dapat mengedit Judul, Deskripsi, dan Kata Kunci secara manual langsung di dalam aplikasi, lalu menyimpannya sebelum mengunduh file CSV.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex gap-4">
-                    <div className="w-8 h-8 shrink-0 rounded-full bg-emerald-50 flex items-center justify-center mt-1">
-                      <Settings className="w-4 h-4 text-emerald-600" />
-                    </div>
-                    <div>
-                      <h3 className="text-sm font-bold text-slate-800 mb-1">Pengaturan Fleksibel</h3>
-                      <p className="text-xs text-slate-600 leading-relaxed">
-                        Atur panjang minimal kata untuk Judul (5-20 kata) dan jumlah Kata Kunci (hingga 50 kata) sesuai dengan standar agensi microstock yang Anda tuju. Tersedia juga pilihan model AI yang bisa disesuaikan.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex gap-4">
-                    <div className="w-8 h-8 shrink-0 rounded-full bg-rose-50 flex items-center justify-center mt-1">
-                      <Download className="w-4 h-4 text-rose-600" />
-                    </div>
-                    <div>
-                      <h3 className="text-sm font-bold text-slate-800 mb-1">Export CSV Multi-Platform</h3>
-                      <p className="text-xs text-slate-600 leading-relaxed">
-                        Unduh metadata dalam format CSV yang sudah disesuaikan dengan standar Freepik, Adobe Stock, dan Shutterstock. Anda bisa memilih ekstensi file (.eps, .jpg, .png) dan memilih untuk mengunduh semua gambar atau hanya gambar yang dipilih.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="mt-8 pt-6 border-t border-slate-100">
-                  <h3 className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2">
-                    <History className="w-4 h-4 text-indigo-600" />
-                    Perubahan Terbaru (Changelog)
-                  </h3>
-                  <div className="space-y-3">
-                    {CHANGELOG_DATA.map((log) => {
-                      const isExpanded = expandedLogs.includes(log.id);
-                      return (
-                        <div key={log.id} className="border border-slate-100 rounded-xl overflow-hidden">
-                          <button
-                            onClick={() => toggleLog(log.id)}
-                            className="w-full flex items-center justify-between p-3 bg-slate-50 hover:bg-slate-100 transition-colors text-left"
-                          >
-                            <div>
-                              <p className="text-xs font-bold text-slate-700">{log.date} <span className="font-normal text-slate-500 ml-2">({log.title})</span></p>
-                            </div>
-                            {isExpanded ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
-                          </button>
-                          <AnimatePresence>
-                            {isExpanded && (
-                              <motion.div
-                                initial={{ height: 0, opacity: 0 }}
-                                animate={{ height: 'auto', opacity: 1 }}
-                                exit={{ height: 0, opacity: 0 }}
-                                className="overflow-hidden"
-                              >
-                                <div className="p-4 bg-white border-t border-slate-100">
-                                  <ul className="space-y-2 text-xs text-slate-600 list-disc list-inside">
-                                    {log.changes.map((change, idx) => (
-                                      <li key={idx}>
-                                        <span className={cn("font-medium", change.type === 'new' ? "text-emerald-600" : change.type === 'fix' ? "text-rose-600" : "text-blue-600")}>
-                                          {change.type === 'new' ? 'Fitur Baru:' : change.type === 'fix' ? 'Bug Fix:' : 'Peningkatan:'}
-                                        </span>{' '}
-                                        {change.text}
-                                      </li>
-                                    ))}
-                                  </ul>
-                                </div>
-                              </motion.div>
-                            )}
-                          </AnimatePresence>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                  <p className="text-xs text-slate-500 text-center">
-                    Dibuat untuk mempermudah alur kerja kontributor microstock.
-                  </p>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      <InfoModal
+        isOpen={showInfoPage}
+        onClose={() => setShowInfoPage(false)}
+      />
 
       {confirmModal.isOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[120]">
