@@ -38,26 +38,18 @@ interface ProcessedPreview {
 }
 
 const MAX_FREEPIK_SIDE = 10000;
-const MIN_SAFE_JPEG_BYTES = 1024 * 1024; // 1 MB optional minimum size
 const TARGET_PRESETS = [
-  { value: 2000, label: 'Min. 2000 px (Standar Freepik)' },
-  { value: 2050, label: 'Min. 2050 px (Aman +50px)' },
+  { value: 2000, label: 'Min. 2000 px' },
   { value: 2500, label: 'Min. 2500 px' },
   { value: 3000, label: 'Min. 3000 px' }
 ];
 
 /**
- * Sets JFIF APP0 density to 300 DPI and optionally ensures minimum byte size
- * using spec-compliant JPEG COM (0xFF 0xFE) segments.
+ * Sets JFIF APP0 density to 300 DPI on a clean, spec-compliant JPEG Blob.
  */
-async function finalizeFreepikJpeg(
-  blob: Blob,
-  forceMin1MB: boolean,
-  dpi: number = 300
-): Promise<Blob> {
+async function setJpegDpi(blob: Blob, dpi: number = 300): Promise<Blob> {
   let buffer = new Uint8Array(await blob.arrayBuffer());
 
-  // Verify JPEG SOI (0xFF 0xD8) and EOI (0xFF 0xD9)
   if (
     buffer.length < 4 ||
     buffer[0] !== 0xff ||
@@ -105,31 +97,7 @@ async function finalizeFreepikJpeg(
     buffer = combined;
   }
 
-  if (!forceMin1MB || buffer.length >= MIN_SAFE_JPEG_BYTES) {
-    return new Blob([buffer], { type: 'image/jpeg' });
-  }
-
-  const targetBytes = MIN_SAFE_JPEG_BYTES + 16 * 1024;
-  let remaining = targetBytes - buffer.length;
-  const maxChunkPayload = 60000;
-  const segments: Uint8Array[] = [];
-
-  while (remaining > 0) {
-    const payloadLen = Math.min(remaining, maxChunkPayload);
-    const segmentLen = payloadLen + 2;
-    const segment = new Uint8Array(2 + segmentLen);
-    segment[0] = 0xff;
-    segment[1] = 0xfe;
-    segment[2] = (segmentLen >> 8) & 0xff;
-    segment[3] = segmentLen & 0xff;
-    segment.fill(0x20, 4);
-    segments.push(segment);
-    remaining -= segment.length;
-  }
-
-  const head = buffer.subarray(0, buffer.length - 2);
-  const eoi = buffer.subarray(buffer.length - 2);
-  return new Blob([head, ...segments, eoi], { type: 'image/jpeg' });
+  return new Blob([buffer], { type: 'image/jpeg' });
 }
 
 /**
@@ -257,8 +225,7 @@ function computeTargetDimensions(width: number, height: number, minSide: number,
 function processImageFile(
   file: File,
   minSide: number,
-  mode: FixMode,
-  forceMin1MB: boolean
+  mode: FixMode
 ): Promise<ProcessedPreview> {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -322,7 +289,7 @@ function processImageFile(
             reject(new Error(`Gagal memproses ${file.name}`));
             return;
           }
-          const finalBlob = await finalizeFreepikJpeg(rawBlob, forceMin1MB, 300);
+          const finalBlob = await setJpegDpi(rawBlob, 300);
 
           const thumbBlob = await new Promise<Blob | null>((res) =>
             thumbCanvas.toBlob((b) => res(b), 'image/jpeg', 0.7)
@@ -367,7 +334,6 @@ function processImageFile(
 export function FreepikDimensionCalculator({ addToast }: FreepikDimensionCalculatorProps) {
   const [minTarget, setMinTarget] = useState<number>(2000);
   const [fixMode, setFixMode] = useState<FixMode>('pad');
-  const [forceMin1MB, setForceMin1MB] = useState<boolean>(false);
   const [items, setItems] = useState<ProcessedPreview[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isExportingZip, setIsExportingZip] = useState(false);
@@ -379,14 +345,14 @@ export function FreepikDimensionCalculator({ addToast }: FreepikDimensionCalcula
     };
   }, []);
 
-  const reprocessAll = async (nextTarget: number, nextMode: FixMode, nextForce1MB: boolean) => {
+  const reprocessAll = async (nextTarget: number, nextMode: FixMode) => {
     if (items.length === 0) return;
     setIsProcessing(true);
     const reprocessed: ProcessedPreview[] = [];
     for (const item of items) {
       URL.revokeObjectURL(item.previewUrl);
       try {
-        const res = await processImageFile(item.file, nextTarget, nextMode, nextForce1MB);
+        const res = await processImageFile(item.file, nextTarget, nextMode);
         res.fileName = item.fileName; // preserve deduplicated name
         reprocessed.push(res);
       } catch {
@@ -427,7 +393,7 @@ export function FreepikDimensionCalculator({ addToast }: FreepikDimensionCalcula
       const processed: ProcessedPreview[] = [];
       for (const file of acceptedFiles) {
         try {
-          const result = await processImageFile(file, minTarget, fixMode, forceMin1MB);
+          const result = await processImageFile(file, minTarget, fixMode);
           result.fileName = getUniqueFileName(result.fileName);
           processed.push(result);
         } catch (err: any) {
@@ -442,7 +408,7 @@ export function FreepikDimensionCalculator({ addToast }: FreepikDimensionCalcula
           renamedCount > 0 ? ` (${renamedCount} duplikat diberi akhiran _1, _2)` : '';
         addToast(
           resizedCount > 0
-            ? `${resizedCount} gambar otomatis diperbaiki (${fixMode === 'pad' ? 'Anti-Blur Padding' : 'Upscale + Sharpen'})${renameNote}`
+            ? `${resizedCount} gambar otomatis diperbaiki (${fixMode === 'pad' ? 'Anti-Blur' : 'Upscale Tajam'})${renameNote}`
             : `${processed.length} gambar sudah memenuhi syarat ≥ ${minTarget} px${renameNote}`,
           'success'
         );
@@ -450,32 +416,26 @@ export function FreepikDimensionCalculator({ addToast }: FreepikDimensionCalcula
 
       setIsProcessing(false);
     },
-    [items, minTarget, fixMode, forceMin1MB, addToast]
+    [items, minTarget, fixMode, addToast]
   );
 
   const handleTargetChange = async (newTarget: number) => {
     setMinTarget(newTarget);
-    await reprocessAll(newTarget, fixMode, forceMin1MB);
+    await reprocessAll(newTarget, fixMode);
     if (items.length > 0) addToast(`Semua gambar diperbarui ke minimal ${newTarget} px`, 'info');
   };
 
   const handleModeChange = async (newMode: FixMode) => {
     setFixMode(newMode);
-    await reprocessAll(minTarget, newMode, forceMin1MB);
+    await reprocessAll(minTarget, newMode);
     if (items.length > 0) {
       addToast(
         newMode === 'pad'
-          ? 'Mode diubah ke Auto-Padding Kanvas (100% Tajam / Anti-Blur)'
-          : 'Mode diubah ke Upscale + Auto-Sharpen',
+          ? 'Mode: Auto-Padding (Anti-Blur)'
+          : 'Mode: Upscale Tajam',
         'info'
       );
     }
-  };
-
-  const handleToggleMin1MB = async () => {
-    const next = !forceMin1MB;
-    setForceMin1MB(next);
-    await reprocessAll(minTarget, fixMode, next);
   };
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
@@ -545,27 +505,56 @@ export function FreepikDimensionCalculator({ addToast }: FreepikDimensionCalcula
   return (
     <div className="max-w-6xl mx-auto space-y-5">
       {/* Compact Header Bar */}
-      <div className="bg-white/80 backdrop-blur-md rounded-3xl border border-slate-200/80 p-4 sm:p-5 shadow-sm flex flex-col gap-3">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center shrink-0">
-              <Ruler className="w-5 h-5 text-indigo-600" />
-            </div>
-            <div>
-              <h2 className="text-base font-black text-slate-800">
-                Auto-Fix Preview Freepik / Magnific
-              </h2>
-              <p className="text-xs text-slate-500">
-                Otomatis perbaiki dimensi minimal {minTarget} px &amp; 300 DPI — bebas error <em>visual defect</em>.
-              </p>
-            </div>
+      <div className="bg-white/80 backdrop-blur-md rounded-3xl border border-slate-200/80 p-4 sm:p-5 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center shrink-0">
+            <Ruler className="w-5 h-5 text-indigo-600" />
+          </div>
+          <div>
+            <h2 className="text-base font-black text-slate-800">
+              Auto-Fix Preview Freepik / Magnific
+            </h2>
+            <p className="text-xs text-slate-500">
+              Upload JPG — otomatis minimal {minTarget} px &amp; 300 DPI, langsung siap download.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl">
+            <button
+              type="button"
+              onClick={() => handleModeChange('pad')}
+              disabled={isProcessing}
+              className={cn(
+                'px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition-all',
+                fixMode === 'pad'
+                  ? 'bg-white text-indigo-600 shadow-sm'
+                  : 'text-slate-500 hover:text-slate-700'
+              )}
+            >
+              Auto-Padding (Anti-Blur)
+            </button>
+            <button
+              type="button"
+              onClick={() => handleModeChange('upscale')}
+              disabled={isProcessing}
+              className={cn(
+                'px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition-all',
+                fixMode === 'upscale'
+                  ? 'bg-white text-indigo-600 shadow-sm'
+                  : 'text-slate-500 hover:text-slate-700'
+              )}
+            >
+              Upscale Tajam
+            </button>
           </div>
 
           <select
             value={minTarget}
             onChange={(e) => handleTargetChange(Number(e.target.value))}
             disabled={isProcessing}
-            className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 shrink-0"
+            className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
           >
             {TARGET_PRESETS.map(p => (
               <option key={p.value} value={p.value}>
@@ -573,53 +562,6 @@ export function FreepikDimensionCalculator({ addToast }: FreepikDimensionCalcula
               </option>
             ))}
           </select>
-        </div>
-
-        {/* Mode & Options Row */}
-        <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-100">
-          <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl">
-            <button
-              type="button"
-              onClick={() => handleModeChange('pad')}
-              disabled={isProcessing}
-              className={cn(
-                'px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all',
-                fixMode === 'pad'
-                  ? 'bg-white text-indigo-600 shadow-sm'
-                  : 'text-slate-500 hover:text-slate-700'
-              )}
-              title="Menambah margin background otomatis tanpa memperbesar piksel asli (100% tajam, anti-blur)"
-            >
-              Auto-Padding Kanvas (Anti-Blur)
-            </button>
-            <button
-              type="button"
-              onClick={() => handleModeChange('upscale')}
-              disabled={isProcessing}
-              className={cn(
-                'px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all',
-                fixMode === 'upscale'
-                  ? 'bg-white text-indigo-600 shadow-sm'
-                  : 'text-slate-500 hover:text-slate-700'
-              )}
-              title="Memperbesar dimensi secara proporsional + filter penajaman tepi ringan"
-            >
-              Upscale + Auto-Sharpen
-            </button>
-          </div>
-
-          <label className="flex items-center gap-2 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={forceMin1MB}
-              onChange={handleToggleMin1MB}
-              disabled={isProcessing}
-              className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-            />
-            <span className="text-[11px] font-bold text-slate-600">
-              Paksa Min. 1 MB <span className="font-normal text-slate-400">(opsional)</span>
-            </span>
-          </label>
         </div>
       </div>
 
