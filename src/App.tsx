@@ -33,7 +33,8 @@ import {
   Play,
   Square,
   AlertTriangle,
-  Chrome
+  Chrome,
+  Ruler
 } from 'lucide-react';
 import { GoogleGenAI, Type } from "@google/genai";
 import * as piexif from "piexifjs";
@@ -47,6 +48,7 @@ import { AssetGrid } from './components/AssetGrid';
 import { MetadataPanel } from './components/MetadataPanel';
 import { BatchDownloadHub } from './components/BatchDownloadHub';
 import { ShutterstockExtensionImporter } from './components/ShutterstockExtensionImporter';
+import { FreepikDimensionCalculator } from './components/FreepikDimensionCalculator';
 import { ApiKeyModal } from './components/ApiKeyModal';
 import { InfoModal } from './components/InfoModal';
 import { categorizeApiError, maskApiKey } from './lib/errorDiagnostics';
@@ -58,7 +60,7 @@ import { MODELS, GROQ_MODELS } from './constants';
 import { ImageData, PngTreeMetadata, Toast, ErrorDiagnostic } from './types';
 
 export default function App() {
-  const [currentPage, setCurrentPage] = useState<'generator' | 'shutterstock_extension'>('generator');
+  const [currentPage, setCurrentPage] = useState<'generator' | 'shutterstock_extension' | 'freepik_calculator'>('generator');
   const [images, setImages] = useState<ImageData[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'standard' | 'pngtree'>('standard');
@@ -2155,34 +2157,48 @@ export default function App() {
 
           <div className="flex-1 overflow-y-auto p-4 sm:p-8 custom-scrollbar pb-24 md:pb-8">
             {/* Page Navigation Tabs */}
-            <div className="flex justify-center mb-6 max-w-xl mx-auto">
+            <div className="flex justify-center mb-6 max-w-2xl mx-auto">
               <div className="bg-slate-100 p-1.5 rounded-2xl flex items-center gap-1.5 border border-slate-200/80 w-full shadow-inner">
                 <button 
                   onClick={() => setCurrentPage('generator')}
                   className={cn(
-                    "flex-1 py-2 px-3.5 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 transition-all duration-300",
+                    "flex-1 py-2 px-3 rounded-xl text-[11px] sm:text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 sm:gap-2 transition-all duration-300",
                     currentPage === 'generator' 
                       ? "bg-white text-indigo-600 shadow-md shadow-indigo-100/30 border border-slate-200/30" 
                       : "text-slate-500 hover:text-slate-800 hover:bg-slate-50/50"
                   )}
                   id="tab-generator"
                 >
-                  <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
-                  AI Generator
+                  <Sparkles className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                  <span className="truncate">AI Generator</span>
                 </button>
 
                 <button 
                   onClick={() => setCurrentPage('shutterstock_extension')}
                   className={cn(
-                    "flex-1 py-2 px-3.5 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 transition-all duration-300",
+                    "flex-1 py-2 px-3 rounded-xl text-[11px] sm:text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 sm:gap-2 transition-all duration-300",
                     currentPage === 'shutterstock_extension' 
                       ? "bg-white text-indigo-600 shadow-md shadow-indigo-100/30 border border-slate-200/30" 
                       : "text-slate-500 hover:text-slate-800 hover:bg-slate-50/50"
                   )}
                   id="tab-shutterstock-extension"
                 >
-                  <Chrome className="w-3.5 h-3.5 text-indigo-500" />
-                  Ekstensi Shutterstock
+                  <Chrome className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                  <span className="truncate">Ekstensi Shutterstock</span>
+                </button>
+
+                <button 
+                  onClick={() => setCurrentPage('freepik_calculator')}
+                  className={cn(
+                    "flex-1 py-2 px-3 rounded-xl text-[11px] sm:text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 sm:gap-2 transition-all duration-300",
+                    currentPage === 'freepik_calculator' 
+                      ? "bg-white text-indigo-600 shadow-md shadow-indigo-100/30 border border-slate-200/30" 
+                      : "text-slate-500 hover:text-slate-800 hover:bg-slate-50/50"
+                  )}
+                  id="tab-freepik-calculator"
+                >
+                  <Ruler className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                  <span className="truncate">Kalkulator Freepik</span>
                 </button>
               </div>
             </div>
@@ -2313,9 +2329,13 @@ export default function App() {
                   </div>
                 </div>
               </div>
-            ) : (
+            ) : currentPage === 'shutterstock_extension' ? (
               <ShutterstockExtensionImporter
                 images={images}
+                addToast={addToast}
+              />
+            ) : (
+              <FreepikDimensionCalculator
                 addToast={addToast}
               />
             )}
