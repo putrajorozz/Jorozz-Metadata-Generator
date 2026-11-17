@@ -18,6 +18,8 @@ interface FreepikDimensionCalculatorProps {
   addToast: (message: string, type?: 'success' | 'error' | 'info') => void;
 }
 
+type FixMode = 'pad' | 'upscale';
+
 interface ProcessedPreview {
   id: string;
   file: File;
@@ -28,6 +30,7 @@ interface ProcessedPreview {
   fixedH: number;
   scaleFactor: number;
   wasResized: boolean;
+  modeUsed: FixMode;
   previewUrl: string;
   fixedBlob: Blob | null;
   fixedSizeKB: number;
@@ -35,7 +38,7 @@ interface ProcessedPreview {
 }
 
 const MAX_FREEPIK_SIDE = 10000;
-const MIN_SAFE_JPEG_BYTES = 1024 * 1024; // 1 MB minimum safe preview size
+const MIN_SAFE_JPEG_BYTES = 1024 * 1024; // 1 MB optional minimum size
 const TARGET_PRESETS = [
   { value: 2000, label: 'Min. 2000 px (Standar Freepik)' },
   { value: 2050, label: 'Min. 2050 px (Aman +50px)' },
@@ -44,13 +47,12 @@ const TARGET_PRESETS = [
 ];
 
 /**
- * Sets JFIF APP0 density to 300 DPI and ensures the JPEG Blob meets the minimum
- * byte size (default 1 MB) using spec-compliant JPEG COM (0xFF 0xFE) segments.
- * Zero visual quality loss and 100% valid JPEG structure.
+ * Sets JFIF APP0 density to 300 DPI and optionally ensures minimum byte size
+ * using spec-compliant JPEG COM (0xFF 0xFE) segments.
  */
 async function finalizeFreepikJpeg(
   blob: Blob,
-  minBytes: number = MIN_SAFE_JPEG_BYTES,
+  forceMin1MB: boolean,
   dpi: number = 300
 ): Promise<Blob> {
   let buffer = new Uint8Array(await blob.arrayBuffer());
@@ -69,34 +71,32 @@ async function finalizeFreepikJpeg(
   const dpiHi = (dpi >> 8) & 0xff;
   const dpiLo = dpi & 0xff;
 
-  // Check if JFIF APP0 segment exists right after SOI
   const hasJfif =
     buffer.length >= 18 &&
     buffer[2] === 0xff &&
     buffer[3] === 0xe0 &&
-    buffer[6] === 0x4a && // 'J'
-    buffer[7] === 0x46 && // 'F'
-    buffer[8] === 0x49 && // 'I'
-    buffer[9] === 0x46 && // 'F'
+    buffer[6] === 0x4a &&
+    buffer[7] === 0x46 &&
+    buffer[8] === 0x49 &&
+    buffer[9] === 0x46 &&
     buffer[10] === 0x00;
 
   if (hasJfif) {
-    buffer[13] = 0x01; // units: dots per inch (DPI)
+    buffer[13] = 0x01; // units: DPI
     buffer[14] = dpiHi;
     buffer[15] = dpiLo;
     buffer[16] = dpiHi;
     buffer[17] = dpiLo;
   } else {
-    // Insert a standard 18-byte JFIF APP0 header with 300 DPI right after SOI
     const jfifSegment = new Uint8Array([
-      0xff, 0xe0, // APP0 marker
-      0x00, 0x10, // length = 16
-      0x4a, 0x46, 0x49, 0x46, 0x00, // "JFIF\0"
-      0x01, 0x01, // version 1.1
-      0x01, // units = DPI
-      dpiHi, dpiLo, // Xdensity = 300
-      dpiHi, dpiLo, // Ydensity = 300
-      0x00, 0x00 // no thumbnail
+      0xff, 0xe0,
+      0x00, 0x10,
+      0x4a, 0x46, 0x49, 0x46, 0x00,
+      0x01, 0x01,
+      0x01,
+      dpiHi, dpiLo,
+      dpiHi, dpiLo,
+      0x00, 0x00
     ]);
     const combined = new Uint8Array(buffer.length + jfifSegment.length);
     combined.set(buffer.subarray(0, 2), 0);
@@ -105,24 +105,24 @@ async function finalizeFreepikJpeg(
     buffer = combined;
   }
 
-  if (buffer.length >= minBytes) {
+  if (!forceMin1MB || buffer.length >= MIN_SAFE_JPEG_BYTES) {
     return new Blob([buffer], { type: 'image/jpeg' });
   }
 
-  const targetBytes = minBytes + 16 * 1024; // slight buffer above 1 MB (~1.02 MB)
+  const targetBytes = MIN_SAFE_JPEG_BYTES + 16 * 1024;
   let remaining = targetBytes - buffer.length;
-  const maxChunkPayload = 60000; // safely below 65533 max COM segment payload
+  const maxChunkPayload = 60000;
   const segments: Uint8Array[] = [];
 
   while (remaining > 0) {
     const payloadLen = Math.min(remaining, maxChunkPayload);
-    const segmentLen = payloadLen + 2; // includes the 2 length bytes
+    const segmentLen = payloadLen + 2;
     const segment = new Uint8Array(2 + segmentLen);
     segment[0] = 0xff;
-    segment[1] = 0xfe; // COM marker
+    segment[1] = 0xfe;
     segment[2] = (segmentLen >> 8) & 0xff;
     segment[3] = segmentLen & 0xff;
-    segment.fill(0x20, 4); // spaces
+    segment.fill(0x20, 4);
     segments.push(segment);
     remaining -= segment.length;
   }
@@ -132,7 +132,95 @@ async function finalizeFreepikJpeg(
   return new Blob([head, ...segments, eoi], { type: 'image/jpeg' });
 }
 
-function computeTargetDimensions(width: number, height: number, minSide: number) {
+/**
+ * Samples the 4 corners of an image to detect solid background color for seamless canvas padding.
+ */
+function detectEdgeBackgroundColor(img: HTMLImageElement): string {
+  try {
+    const sampleCanvas = document.createElement('canvas');
+    sampleCanvas.width = img.naturalWidth;
+    sampleCanvas.height = img.naturalHeight;
+    const sCtx = sampleCanvas.getContext('2d');
+    if (!sCtx) return '#FFFFFF';
+    sCtx.fillStyle = '#FFFFFF';
+    sCtx.fillRect(0, 0, sampleCanvas.width, sampleCanvas.height);
+    sCtx.drawImage(img, 0, 0);
+
+    const w = sampleCanvas.width;
+    const h = sampleCanvas.height;
+    const corners = [
+      sCtx.getImageData(0, 0, 1, 1).data,
+      sCtx.getImageData(w - 1, 0, 1, 1).data,
+      sCtx.getImageData(0, h - 1, 1, 1).data,
+      sCtx.getImageData(w - 1, h - 1, 1, 1).data
+    ];
+
+    const r = Math.round((corners[0][0] + corners[1][0] + corners[2][0] + corners[3][0]) / 4);
+    const g = Math.round((corners[0][1] + corners[1][1] + corners[2][1] + corners[3][1]) / 4);
+    const b = Math.round((corners[0][2] + corners[1][2] + corners[2][2] + corners[3][2]) / 4);
+
+    // Check if corners are reasonably consistent (solid/near-solid background)
+    const maxDiff = Math.max(
+      ...corners.map(c => Math.abs(c[0] - r) + Math.abs(c[1] - g) + Math.abs(c[2] - b))
+    );
+    if (maxDiff <= 45) {
+      return `rgb(${r}, ${g}, ${b})`;
+    }
+  } catch {
+    // Fallback to white
+  }
+  return '#FFFFFF';
+}
+
+/**
+ * Applies a subtle 3x3 Unsharp Mask sharpening filter to restore crisp edges after upscaling.
+ */
+function applyMildSharpen(ctx: CanvasRenderingContext2D, width: number, height: number, strength = 0.28) {
+  const imgData = ctx.getImageData(0, 0, width, height);
+  const src = imgData.data;
+  const out = new Uint8ClampedArray(src.length);
+  const center = 1 + 4 * strength;
+  const side = -strength;
+
+  for (let y = 1; y < height - 1; y++) {
+    const row = y * width;
+    for (let x = 1; x < width - 1; x++) {
+      const idx = (row + x) * 4;
+      const up = ((y - 1) * width + x) * 4;
+      const down = ((y + 1) * width + x) * 4;
+      const left = (row + (x - 1)) * 4;
+      const right = (row + (x + 1)) * 4;
+
+      out[idx] = src[idx] * center + (src[up] + src[down] + src[left] + src[right]) * side;
+      out[idx + 1] = src[idx + 1] * center + (src[up + 1] + src[down + 1] + src[left + 1] + src[right + 1]) * side;
+      out[idx + 2] = src[idx + 2] * center + (src[up + 2] + src[down + 2] + src[left + 2] + src[right + 2]) * side;
+      out[idx + 3] = 255;
+    }
+  }
+
+  // Copy border pixels unchanged
+  for (let x = 0; x < width; x++) {
+    const top = x * 4;
+    const bot = ((height - 1) * width + x) * 4;
+    for (let c = 0; c < 4; c++) {
+      out[top + c] = src[top + c];
+      out[bot + c] = src[bot + c];
+    }
+  }
+  for (let y = 0; y < height; y++) {
+    const l = (y * width) * 4;
+    const r = (y * width + (width - 1)) * 4;
+    for (let c = 0; c < 4; c++) {
+      out[l + c] = src[l + c];
+      out[r + c] = src[r + c];
+    }
+  }
+
+  imgData.data.set(out);
+  ctx.putImageData(imgData, 0, 0);
+}
+
+function computeTargetDimensions(width: number, height: number, minSide: number, mode: FixMode) {
   const safeW = Math.max(1, Math.round(width));
   const safeH = Math.max(1, Math.round(height));
   const minDim = Math.min(safeW, safeH);
@@ -151,13 +239,27 @@ function computeTargetDimensions(width: number, height: number, minSide: number)
     return { fixedW: safeW, fixedH: safeH, wasResized: false };
   }
 
+  if (mode === 'pad') {
+    // Expand canvas to at least minSide on both sides without upscaling original pixels
+    return {
+      fixedW: Math.max(safeW, minSide),
+      fixedH: Math.max(safeH, minSide),
+      wasResized: true
+    };
+  }
+
   const scale = minSide / minDim;
   const fixedW = safeW <= safeH ? minSide : Math.ceil(safeW * scale);
   const fixedH = safeH < safeW ? minSide : Math.ceil(safeH * scale);
   return { fixedW, fixedH, wasResized: true };
 }
 
-function processImageFile(file: File, minSide: number): Promise<ProcessedPreview> {
+function processImageFile(
+  file: File,
+  minSide: number,
+  mode: FixMode,
+  forceMin1MB: boolean
+): Promise<ProcessedPreview> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     const srcUrl = URL.createObjectURL(file);
@@ -165,7 +267,7 @@ function processImageFile(file: File, minSide: number): Promise<ProcessedPreview
     img.onload = () => {
       const originalW = img.naturalWidth;
       const originalH = img.naturalHeight;
-      const { fixedW, fixedH, wasResized } = computeTargetDimensions(originalW, originalH, minSide);
+      const { fixedW, fixedH, wasResized } = computeTargetDimensions(originalW, originalH, minSide, mode);
 
       const canvas = document.createElement('canvas');
       canvas.width = fixedW;
@@ -178,23 +280,39 @@ function processImageFile(file: File, minSide: number): Promise<ProcessedPreview
         return;
       }
 
-      ctx.fillStyle = '#FFFFFF';
-      ctx.fillRect(0, 0, fixedW, fixedH);
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = 'high';
-      ctx.drawImage(img, 0, 0, fixedW, fixedH);
+      if (mode === 'pad' && wasResized && Math.min(originalW, originalH) < minSide) {
+        // Auto-Padding Mode: zero pixel scaling (100% original sharpness)
+        const bgColor = detectEdgeBackgroundColor(img);
+        ctx.fillStyle = bgColor;
+        ctx.fillRect(0, 0, fixedW, fixedH);
+        const offsetX = Math.floor((fixedW - originalW) / 2);
+        const offsetY = Math.floor((fixedH - originalH) / 2);
+        ctx.drawImage(img, offsetX, offsetY, originalW, originalH);
+      } else {
+        // Upscale Mode (or already passing)
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, fixedW, fixedH);
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, 0, 0, fixedW, fixedH);
+
+        // Apply mild sharpening only when actually upscaled
+        if (wasResized && (fixedW > originalW || fixedH > originalH)) {
+          applyMildSharpen(ctx, fixedW, fixedH, 0.28);
+        }
+      }
 
       // Create lightweight thumbnail (max 120px) for UI grid to keep RAM low on large batches
       const thumbMax = 120;
-      const thumbScale = Math.min(1, thumbMax / Math.max(originalW, originalH));
+      const thumbScale = Math.min(1, thumbMax / Math.max(fixedW, fixedH));
       const thumbCanvas = document.createElement('canvas');
-      thumbCanvas.width = Math.max(1, Math.round(originalW * thumbScale));
-      thumbCanvas.height = Math.max(1, Math.round(originalH * thumbScale));
+      thumbCanvas.width = Math.max(1, Math.round(fixedW * thumbScale));
+      thumbCanvas.height = Math.max(1, Math.round(fixedH * thumbScale));
       const thumbCtx = thumbCanvas.getContext('2d');
       if (thumbCtx) {
         thumbCtx.fillStyle = '#FFFFFF';
         thumbCtx.fillRect(0, 0, thumbCanvas.width, thumbCanvas.height);
-        thumbCtx.drawImage(img, 0, 0, thumbCanvas.width, thumbCanvas.height);
+        thumbCtx.drawImage(canvas, 0, 0, thumbCanvas.width, thumbCanvas.height);
       }
 
       canvas.toBlob(
@@ -204,7 +322,7 @@ function processImageFile(file: File, minSide: number): Promise<ProcessedPreview
             reject(new Error(`Gagal memproses ${file.name}`));
             return;
           }
-          const finalBlob = await finalizeFreepikJpeg(rawBlob, MIN_SAFE_JPEG_BYTES, 300);
+          const finalBlob = await finalizeFreepikJpeg(rawBlob, forceMin1MB, 300);
 
           const thumbBlob = await new Promise<Blob | null>((res) =>
             thumbCanvas.toBlob((b) => res(b), 'image/jpeg', 0.7)
@@ -212,7 +330,9 @@ function processImageFile(file: File, minSide: number): Promise<ProcessedPreview
           const previewUrl = URL.createObjectURL(thumbBlob || finalBlob);
 
           const baseName = file.name.replace(/\.[^/.]+$/, '');
-          const scaleFactor = Math.max(fixedW / originalW, fixedH / originalH);
+          const scaleFactor =
+            mode === 'pad' ? 1 : Math.max(fixedW / originalW, fixedH / originalH);
+
           resolve({
             id: `${file.name}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
             file,
@@ -223,6 +343,7 @@ function processImageFile(file: File, minSide: number): Promise<ProcessedPreview
             fixedH,
             scaleFactor,
             wasResized,
+            modeUsed: mode,
             previewUrl,
             fixedBlob: finalBlob,
             fixedSizeKB: Math.round(finalBlob.size / 1024),
@@ -245,6 +366,8 @@ function processImageFile(file: File, minSide: number): Promise<ProcessedPreview
 
 export function FreepikDimensionCalculator({ addToast }: FreepikDimensionCalculatorProps) {
   const [minTarget, setMinTarget] = useState<number>(2000);
+  const [fixMode, setFixMode] = useState<FixMode>('pad');
+  const [forceMin1MB, setForceMin1MB] = useState<boolean>(false);
   const [items, setItems] = useState<ProcessedPreview[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isExportingZip, setIsExportingZip] = useState(false);
@@ -255,6 +378,24 @@ export function FreepikDimensionCalculator({ addToast }: FreepikDimensionCalcula
       items.forEach(item => URL.revokeObjectURL(item.previewUrl));
     };
   }, []);
+
+  const reprocessAll = async (nextTarget: number, nextMode: FixMode, nextForce1MB: boolean) => {
+    if (items.length === 0) return;
+    setIsProcessing(true);
+    const reprocessed: ProcessedPreview[] = [];
+    for (const item of items) {
+      URL.revokeObjectURL(item.previewUrl);
+      try {
+        const res = await processImageFile(item.file, nextTarget, nextMode, nextForce1MB);
+        res.fileName = item.fileName; // preserve deduplicated name
+        reprocessed.push(res);
+      } catch {
+        // skip failed item
+      }
+    }
+    setItems(reprocessed);
+    setIsProcessing(false);
+  };
 
   const onDrop = useCallback(
     async (acceptedFiles: File[]) => {
@@ -286,7 +427,7 @@ export function FreepikDimensionCalculator({ addToast }: FreepikDimensionCalcula
       const processed: ProcessedPreview[] = [];
       for (const file of acceptedFiles) {
         try {
-          const result = await processImageFile(file, minTarget);
+          const result = await processImageFile(file, minTarget, fixMode, forceMin1MB);
           result.fileName = getUniqueFileName(result.fileName);
           processed.push(result);
         } catch (err: any) {
@@ -297,10 +438,11 @@ export function FreepikDimensionCalculator({ addToast }: FreepikDimensionCalcula
       if (processed.length > 0) {
         setItems(prev => [...processed, ...prev]);
         const resizedCount = processed.filter(p => p.wasResized).length;
-        const renameNote = renamedCount > 0 ? ` (${renamedCount} nama duplikat otomatis diberi akhiran _1, _2)` : '';
+        const renameNote =
+          renamedCount > 0 ? ` (${renamedCount} duplikat diberi akhiran _1, _2)` : '';
         addToast(
           resizedCount > 0
-            ? `${resizedCount} gambar otomatis diperbaiki ke minimal ${minTarget} px${renameNote}`
+            ? `${resizedCount} gambar otomatis diperbaiki (${fixMode === 'pad' ? 'Anti-Blur Padding' : 'Upscale + Sharpen'})${renameNote}`
             : `${processed.length} gambar sudah memenuhi syarat ≥ ${minTarget} px${renameNote}`,
           'success'
         );
@@ -308,27 +450,32 @@ export function FreepikDimensionCalculator({ addToast }: FreepikDimensionCalcula
 
       setIsProcessing(false);
     },
-    [items, minTarget, addToast]
+    [items, minTarget, fixMode, forceMin1MB, addToast]
   );
 
   const handleTargetChange = async (newTarget: number) => {
     setMinTarget(newTarget);
-    if (items.length === 0) return;
+    await reprocessAll(newTarget, fixMode, forceMin1MB);
+    if (items.length > 0) addToast(`Semua gambar diperbarui ke minimal ${newTarget} px`, 'info');
+  };
 
-    setIsProcessing(true);
-    const reprocessed: ProcessedPreview[] = [];
-    for (const item of items) {
-      URL.revokeObjectURL(item.previewUrl);
-      try {
-        const res = await processImageFile(item.file, newTarget);
-        reprocessed.push(res);
-      } catch {
-        // skip failed item
-      }
+  const handleModeChange = async (newMode: FixMode) => {
+    setFixMode(newMode);
+    await reprocessAll(minTarget, newMode, forceMin1MB);
+    if (items.length > 0) {
+      addToast(
+        newMode === 'pad'
+          ? 'Mode diubah ke Auto-Padding Kanvas (100% Tajam / Anti-Blur)'
+          : 'Mode diubah ke Upscale + Auto-Sharpen',
+        'info'
+      );
     }
-    setItems(reprocessed);
-    setIsProcessing(false);
-    addToast(`Semua gambar diperbarui ke minimal ${newTarget} px`, 'info');
+  };
+
+  const handleToggleMin1MB = async () => {
+    const next = !forceMin1MB;
+    setForceMin1MB(next);
+    await reprocessAll(minTarget, fixMode, next);
   };
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
@@ -398,33 +545,82 @@ export function FreepikDimensionCalculator({ addToast }: FreepikDimensionCalcula
   return (
     <div className="max-w-6xl mx-auto space-y-5">
       {/* Compact Header Bar */}
-      <div className="bg-white/80 backdrop-blur-md rounded-3xl border border-slate-200/80 p-4 sm:p-5 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center shrink-0">
-            <Ruler className="w-5 h-5 text-indigo-600" />
+      <div className="bg-white/80 backdrop-blur-md rounded-3xl border border-slate-200/80 p-4 sm:p-5 shadow-sm flex flex-col gap-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center shrink-0">
+              <Ruler className="w-5 h-5 text-indigo-600" />
+            </div>
+            <div>
+              <h2 className="text-base font-black text-slate-800">
+                Auto-Fix Preview Freepik / Magnific
+              </h2>
+              <p className="text-xs text-slate-500">
+                Otomatis perbaiki dimensi minimal {minTarget} px &amp; 300 DPI — bebas error <em>visual defect</em>.
+              </p>
+            </div>
           </div>
-          <div>
-            <h2 className="text-base font-black text-slate-800">
-              Auto-Fix Preview Freepik / Magnific
-            </h2>
-            <p className="text-xs text-slate-500">
-              Upload file JPG — dimensi otomatis diperbaiki ke minimal {minTarget} px per sisi, 300 DPI & ukuran file minimal 1 MB.
-            </p>
-          </div>
+
+          <select
+            value={minTarget}
+            onChange={(e) => handleTargetChange(Number(e.target.value))}
+            disabled={isProcessing}
+            className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 shrink-0"
+          >
+            {TARGET_PRESETS.map(p => (
+              <option key={p.value} value={p.value}>
+                {p.label}
+              </option>
+            ))}
+          </select>
         </div>
 
-        <select
-          value={minTarget}
-          onChange={(e) => handleTargetChange(Number(e.target.value))}
-          disabled={isProcessing}
-          className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 shrink-0"
-        >
-          {TARGET_PRESETS.map(p => (
-            <option key={p.value} value={p.value}>
-              {p.label}
-            </option>
-          ))}
-        </select>
+        {/* Mode & Options Row */}
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-100">
+          <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl">
+            <button
+              type="button"
+              onClick={() => handleModeChange('pad')}
+              disabled={isProcessing}
+              className={cn(
+                'px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all',
+                fixMode === 'pad'
+                  ? 'bg-white text-indigo-600 shadow-sm'
+                  : 'text-slate-500 hover:text-slate-700'
+              )}
+              title="Menambah margin background otomatis tanpa memperbesar piksel asli (100% tajam, anti-blur)"
+            >
+              Auto-Padding Kanvas (Anti-Blur)
+            </button>
+            <button
+              type="button"
+              onClick={() => handleModeChange('upscale')}
+              disabled={isProcessing}
+              className={cn(
+                'px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all',
+                fixMode === 'upscale'
+                  ? 'bg-white text-indigo-600 shadow-sm'
+                  : 'text-slate-500 hover:text-slate-700'
+              )}
+              title="Memperbesar dimensi secara proporsional + filter penajaman tepi ringan"
+            >
+              Upscale + Auto-Sharpen
+            </button>
+          </div>
+
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={forceMin1MB}
+              onChange={handleToggleMin1MB}
+              disabled={isProcessing}
+              className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+            />
+            <span className="text-[11px] font-bold text-slate-600">
+              Paksa Min. 1 MB <span className="font-normal text-slate-400">(opsional)</span>
+            </span>
+          </label>
+        </div>
       </div>
 
       {/* Left-Right Split Layout */}
@@ -455,7 +651,9 @@ export function FreepikDimensionCalculator({ addToast }: FreepikDimensionCalcula
                 : 'Upload / Drag & Drop JPG'}
           </p>
           <p className="text-[11px] text-slate-500 mt-1.5 leading-relaxed">
-            Bisa upload 1 atau banyak file sekaligus. Otomatis diperbaiki & siap diunduh di panel kanan.
+            {fixMode === 'pad'
+              ? 'Mode Anti-Blur aktif: menambahkan margin background otomatis tanpa merusak ketajaman piksel asli.'
+              : 'Mode Upscale + Sharpen aktif: memperbesar proporsional dengan filter penajaman tepi.'}
           </p>
         </div>
 
@@ -545,7 +743,7 @@ export function FreepikDimensionCalculator({ addToast }: FreepikDimensionCalcula
                     </div>
                     {item.scaleFactor > 2 && (
                       <p className="text-[10px] text-amber-700 mt-1 leading-tight">
-                        Pembesaran &gt; 200% — disarankan export ulang dari file vektor/EPS asli.
+                        Pembesaran &gt; 200% — disarankan pakai mode Auto-Padding atau export ulang dari vektor asli.
                       </p>
                     )}
                   </div>
