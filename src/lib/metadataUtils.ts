@@ -15,6 +15,7 @@ export interface BuildPromptOptions {
   keywordCount?: number;
   styleHint?: string;
   titlePreset?: 'commercial' | 'minimalist' | 'detailed' | 'ecommerce';
+  excludedTitleWords?: string;
 }
 
 export const BANNED_WORDS = [
@@ -28,7 +29,8 @@ export function buildMicrostockPrompt({
   titleLength = 100,
   keywordCount = 50,
   styleHint = '',
-  titlePreset = 'commercial'
+  titlePreset = 'commercial',
+  excludedTitleWords = ''
 }: BuildPromptOptions): string {
   const presetInstruction = {
     commercial: "Style Focus: High-converting Commercial Microstock. Maximum SEO impact, action & subject first.",
@@ -39,6 +41,15 @@ export function buildMicrostockPrompt({
 
   const customHintSection = styleHint && styleHint.trim().length > 0 
     ? `\nIMPORTANT USER STYLE/NICHE CONTEXT: "${styleHint.trim()}". (Naturally incorporate this specific artistic medium/niche into the title and keywords).`
+    : '';
+
+  const excludedList = excludedTitleWords
+    .split(/[,;\n]/)
+    .map(w => w.trim())
+    .filter(Boolean);
+
+  const excludedTitleRule = excludedList.length > 0
+    ? `\n     * STRICTLY FORBIDDEN WORDS/PHRASES IN TITLE: NEVER use any of the following words or phrases in "title" (in any case): ${excludedList.map(w => `"${w}"`).join(', ')}. Rephrase naturally without them.`
     : '';
 
   return `You are an elite Microstock SEO Metadata Specialist (Shutterstock, Adobe Stock, Freepik, PNGTree, Getty Images, VectorStock).
@@ -56,7 +67,7 @@ Generate the following metadata in JSON format:
    - MANDATORY RULES:
      * DO NOT start with robotic or generic filler phrases ("A", "An", "The", "Vector illustration of", "An image of", "Close up of", "Photo showing", "3D render of", "Isolated on").
      * Start immediately with the main subject (e.g., "Cute Golden Retriever Puppy Playing with Ball in Green Park at Sunrise").
-     * If the target length is long (>70 chars), naturally expand with rich visual details (lighting, color palette, texture, composition, concept) rather than fluff or repetition.
+     * If the target length is long (>70 chars), naturally expand with rich visual details (lighting, color palette, texture, composition, concept) rather than fluff or repetition.${excludedTitleRule}
 
 2. "description": A concise, natural 15-25 word description suitable for stock catalogs.
    - Describe subject, dominant colors, atmosphere, and practical design usage (e.g. ideal for website banner, poster, invitation, branding, social media).
@@ -109,10 +120,32 @@ CRITICAL CONSTRAINTS:
 - Return raw JSON matching the requested fields cleanly.`;
 }
 
-export function sanitizeMicrostockMetadata(raw: any, targetKeywordCount = 50) {
+export function sanitizeMicrostockMetadata(raw: any, targetKeywordCount = 50, excludedTitleWords = '') {
   let title = String(raw.title || '').trim();
   // Clean Shutterstock disallowed characters (&, <, >, /, \)
   title = cleanShutterstockText(title);
+
+  // Strip user-defined excluded words/phrases from title (longest first)
+  if (excludedTitleWords && excludedTitleWords.trim().length > 0) {
+    const phrases = excludedTitleWords
+      .split(/[,;\n]/)
+      .map(w => w.trim())
+      .filter(Boolean)
+      .sort((a, b) => b.length - a.length);
+
+    for (const phrase of phrases) {
+      const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(`\\b${escaped}\\b`, 'gi');
+      title = title.replace(regex, ' ');
+    }
+    // Clean up stray punctuation or multiple spaces left after stripping
+    title = title
+      .replace(/\s+,/g, ',')
+      .replace(/,\s*,+/g, ',')
+      .replace(/^[\s,.\-–—]+|[\s,.\-–—]+$/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
 
   // Strip robotic prefix if model accidentally includes it
   title = title.replace(/^(a|an|the|image of|photo of|vector of|vector illustration of|3d render of|illustration of|close up of|picture of)\s+/i, '');

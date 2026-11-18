@@ -169,6 +169,10 @@ export default function App() {
   };
 
   const [styleHint, setStyleHint] = useState<string>(() => localStorage.getItem('style_hint') || '');
+  const [excludedTitleWords, setExcludedTitleWords] = useState<string>(() => {
+    const saved = localStorage.getItem('excluded_title_words');
+    return saved !== null ? saved : 'set of, flat vector';
+  });
   const [titlePreset, setTitlePreset] = useState<'commercial' | 'minimalist' | 'detailed' | 'ecommerce'>(() => {
     return (localStorage.getItem('title_preset') as any) || 'commercial';
   });
@@ -178,13 +182,17 @@ export default function App() {
   }, [styleHint]);
 
   useEffect(() => {
+    localStorage.setItem('excluded_title_words', excludedTitleWords);
+  }, [excludedTitleWords]);
+
+  useEffect(() => {
     localStorage.setItem('title_preset', titlePreset);
   }, [titlePreset]);
 
   const handleOptimizeMetadata = useCallback((id: string) => {
     setImages(prev => prev.map(img => {
       if (img.id === id && img.metadata) {
-        const sanitized = sanitizeMicrostockMetadata(img.metadata, keywordCount);
+        const sanitized = sanitizeMicrostockMetadata(img.metadata, keywordCount, excludedTitleWords);
         addToast("Metadata berhasil diformat & disanitasi secara SEO", "success");
         return {
           ...img,
@@ -727,6 +735,7 @@ export default function App() {
                 titleLength,
                 keywordCount,
                 styleHint,
+                excludedTitleWords,
                 titlePreset
               });
               
@@ -766,7 +775,7 @@ export default function App() {
               }
 
               const result = JSON.parse(response.text);
-              const sanitized = sanitizeMicrostockMetadata(result, keywordCount);
+              const sanitized = sanitizeMicrostockMetadata(result, keywordCount, excludedTitleWords);
               
               const updatedMetadata = {
                 title: sanitized.title,
@@ -909,6 +918,7 @@ export default function App() {
                 titleLength,
                 keywordCount,
                 styleHint,
+                excludedTitleWords,
                 titlePreset
               });
 
@@ -955,7 +965,7 @@ export default function App() {
               }
 
               const result = JSON.parse(resultText);
-              const sanitized = sanitizeMicrostockMetadata(result, keywordCount);
+              const sanitized = sanitizeMicrostockMetadata(result, keywordCount, excludedTitleWords);
 
               const updatedMetadata = {
                 title: sanitized.title,
@@ -1163,7 +1173,7 @@ export default function App() {
 
             let mimeType = currentImg!.file.type || "image/jpeg";
             const isTransparent = currentImg!.file.type === 'image/png' || currentImg!.file.type === 'image/svg+xml';
-            const promptText = buildMicrostockPrompt({ isTransparent, titleLength, keywordCount, styleHint, titlePreset });
+            const promptText = buildMicrostockPrompt({ isTransparent, titleLength, keywordCount, styleHint, titlePreset, excludedTitleWords });
 
             const response = await ai.models.generateContent({
               model: currentModelId,
@@ -1198,7 +1208,7 @@ export default function App() {
 
             if (!response.text) throw new Error("Empty response from Gemini API");
             const result = JSON.parse(response.text);
-            const sanitized = sanitizeMicrostockMetadata(result, keywordCount);
+            const sanitized = sanitizeMicrostockMetadata(result, keywordCount, excludedTitleWords);
 
             const updatedMetadata = {
               title: sanitized.title,
@@ -1254,7 +1264,7 @@ export default function App() {
 
             let mimeType = currentImg!.file.type || "image/jpeg";
             const isTransparent = currentImg!.file.type === 'image/png' || currentImg!.file.type === 'image/svg+xml';
-            const promptText = buildMicrostockPrompt({ isTransparent, titleLength, keywordCount, styleHint, titlePreset });
+            const promptText = buildMicrostockPrompt({ isTransparent, titleLength, keywordCount, styleHint, titlePreset, excludedTitleWords });
 
             const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
               method: "POST",
@@ -1296,7 +1306,7 @@ export default function App() {
             }
 
             const result = JSON.parse(resultText);
-            const sanitized = sanitizeMicrostockMetadata(result, keywordCount);
+            const sanitized = sanitizeMicrostockMetadata(result, keywordCount, excludedTitleWords);
 
             const updatedMetadata = {
               title: sanitized.title,
@@ -1465,6 +1475,7 @@ export default function App() {
               titleLength,
               keywordCount,
               styleHint,
+              excludedTitleWords,
               titlePreset
             });
             
@@ -1504,7 +1515,7 @@ export default function App() {
             }
 
             const result = JSON.parse(response.text);
-            const sanitized = sanitizeMicrostockMetadata(result, keywordCount);
+            const sanitized = sanitizeMicrostockMetadata(result, keywordCount, excludedTitleWords);
 
             const updatedMetadata = {
               title: sanitized.title,
@@ -1606,6 +1617,7 @@ export default function App() {
               titleLength,
               keywordCount,
               styleHint,
+              excludedTitleWords,
               titlePreset
             });
 
@@ -1651,7 +1663,7 @@ export default function App() {
             }
 
             const result = JSON.parse(resultText);
-            const sanitized = sanitizeMicrostockMetadata(result, keywordCount);
+            const sanitized = sanitizeMicrostockMetadata(result, keywordCount, excludedTitleWords);
 
             const updatedMetadata = {
               title: sanitized.title,
@@ -2227,6 +2239,8 @@ export default function App() {
                     setTitlePreset={setTitlePreset}
                     styleHint={styleHint}
                     setStyleHint={setStyleHint}
+                    excludedTitleWords={excludedTitleWords}
+                    setExcludedTitleWords={setExcludedTitleWords}
                     generateMetadata={generateMetadata}
                     isGenerating={isGenerating}
                     isPaused={isPaused}

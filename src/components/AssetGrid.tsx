@@ -15,7 +15,8 @@ import {
   Play,
   Square,
   Key,
-  AlertTriangle
+  AlertTriangle,
+  Ban
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useEffect, useState } from 'react';
@@ -41,6 +42,8 @@ interface AssetGridProps {
   setTitlePreset?: (preset: 'commercial' | 'minimalist' | 'detailed' | 'ecommerce') => void;
   styleHint?: string;
   setStyleHint?: (hint: string) => void;
+  excludedTitleWords?: string;
+  setExcludedTitleWords?: (words: string) => void;
   generateMetadata: () => void;
   isGenerating: boolean;
   isPaused?: boolean;
@@ -91,6 +94,8 @@ export function AssetGrid({
   setTitlePreset,
   styleHint = '',
   setStyleHint,
+  excludedTitleWords = '',
+  setExcludedTitleWords,
   generateMetadata,
   isGenerating,
   isPaused = false,
@@ -304,6 +309,76 @@ export function AssetGrid({
                       placeholder='Contoh: "Kawaii Sticker Set", "3D Isometric Icon", "Watercolor Floral Pattern"'
                       className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:outline-none placeholder:text-slate-300 shadow-xs"
                     />
+                  </div>
+
+                  {/* Excluded Title Words (Blacklist) */}
+                  <div className="pt-2 border-t border-slate-100 space-y-2">
+                    <div className="flex justify-between items-center">
+                      <label className="text-xs font-bold text-slate-600 flex items-center gap-1.5">
+                        <Ban className="w-3.5 h-3.5 text-rose-500" />
+                        Kata Terlarang di Judul (Blacklist)
+                        <div className="relative group inline-block">
+                          <Info className="w-3 h-3 text-slate-400 hover:text-indigo-500 transition-colors cursor-pointer" />
+                          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 hidden group-hover:block bg-slate-900 text-white text-[9px] font-normal p-2 rounded-lg leading-normal shadow-md z-50 pointer-events-none">
+                            Pisahkan dengan koma. Kata/frasa di sini dilarang muncul di Judul (dicegah saat prompt AI & dibersihkan otomatis setelah generate).
+                          </div>
+                        </div>
+                      </label>
+                      {excludedTitleWords && (
+                        <button
+                          type="button"
+                          onClick={() => setExcludedTitleWords?.('')}
+                          className="text-[9px] text-slate-400 hover:text-red-500 font-bold"
+                        >
+                          Bersihkan
+                        </button>
+                      )}
+                    </div>
+                    <input
+                      type="text"
+                      value={excludedTitleWords}
+                      onChange={(e) => setExcludedTitleWords?.(e.target.value)}
+                      placeholder='Contoh: set of, flat vector, icon set, vector illustration'
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-rose-500/20 focus:border-rose-400 focus:outline-none placeholder:text-slate-300 shadow-xs"
+                    />
+                    <div className="flex flex-wrap gap-1.5">
+                      {['set of', 'flat vector', 'vector illustration', 'icon set', 'collection of'].map((preset) => {
+                        const list = excludedTitleWords
+                          .split(/[,;\n]+/)
+                          .map((w) => w.trim().toLowerCase())
+                          .filter(Boolean);
+                        const isActive = list.includes(preset.toLowerCase());
+                        return (
+                          <button
+                            key={preset}
+                            type="button"
+                            onClick={() => {
+                              if (!setExcludedTitleWords) return;
+                              const current = excludedTitleWords
+                                .split(/[,;\n]+/)
+                                .map((w) => w.trim())
+                                .filter(Boolean);
+                              if (isActive) {
+                                setExcludedTitleWords(
+                                  current.filter((w) => w.toLowerCase() !== preset.toLowerCase()).join(', ')
+                                );
+                              } else {
+                                setExcludedTitleWords([...current, preset].join(', '));
+                              }
+                            }}
+                            className={cn(
+                              'px-2 py-0.5 rounded-md text-[10px] font-semibold border transition-all cursor-pointer',
+                              isActive
+                                ? 'bg-rose-50 text-rose-600 border-rose-200'
+                                : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300 hover:text-slate-700'
+                            )}
+                          >
+                            {isActive ? '✕ ' : '+ '}
+                            {preset}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
               )}
