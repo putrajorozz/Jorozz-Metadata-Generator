@@ -54,11 +54,9 @@ export function BatchDownloadHub({
     if (completedImages.length === 0) return '.png';
     const formats = completedImages.map(img => img.file.type);
     const pngCount = formats.filter(f => f === 'image/png').length;
-    const svgCount = formats.filter(f => f === 'image/svg+xml').length;
     const jpgCount = formats.filter(f => f === 'image/jpeg' || f === 'image/jpg').length;
     
     if (viewMode === 'pngtree') return '.png'; 
-    if (svgCount > 0) return '.svg';
     if (pngCount > jpgCount) return '.png';
     if (jpgCount > 0) return '.jpg';
     return '.eps'; // Default for vectors/others

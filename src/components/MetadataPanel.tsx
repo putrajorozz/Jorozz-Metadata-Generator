@@ -227,7 +227,6 @@ export function MetadataPanel({
     const type = selectedImage.file.type;
     
     if (viewMode === 'pngtree') return '.png';
-    if (type === 'image/svg+xml') return '.svg';
     if (type === 'image/png') return '.png';
     if (type === 'image/jpeg' || type === 'image/jpg') return '.jpg';
     return '.eps';

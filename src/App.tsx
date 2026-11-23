@@ -515,7 +515,14 @@ export default function App() {
       // Get current hashes
       const existingHashes = new Set(images.map(img => img.hash).filter(Boolean));
 
-      for (const file of acceptedFiles) {
+      const validFiles = acceptedFiles.filter(
+        file => file.type !== 'image/svg+xml' && !file.name.toLowerCase().endsWith('.svg')
+      );
+      if (validFiles.length < acceptedFiles.length) {
+        addToast("Upload file SVG tidak didukung. Gunakan format JPG atau PNG.", "error");
+      }
+
+      for (const file of validFiles) {
         const hash = await getFileHash(file);
         
         if (existingHashes.has(hash)) {
@@ -553,10 +560,20 @@ export default function App() {
 
   const { getRootProps, getInputProps, isDragActive, open } = useDropzone({
     onDrop,
+    onDropRejected: (fileRejections) => {
+      const hasSvg = fileRejections.some(
+        r => r.file.type === 'image/svg+xml' || r.file.name.toLowerCase().endsWith('.svg')
+      );
+      addToast(
+        hasSvg
+          ? "Upload file SVG tidak didukung. Gunakan format JPG atau PNG."
+          : "Format file tidak didukung. Gunakan format JPG atau PNG.",
+        "error"
+      );
+    },
     accept: { 
       'image/jpeg': ['.jpg', '.jpeg'],
-      'image/png': ['.png'],
-      'image/svg+xml': ['.svg']
+      'image/png': ['.png']
     },
     multiple: true,
     noClick: true
@@ -587,7 +604,7 @@ export default function App() {
         ctx?.clearRect(0, 0, canvas.width, canvas.height); // Ensure transparency is cleared
         ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
         
-        const mimeType = file.type === 'image/png' || file.type === 'image/svg+xml' ? 'image/png' : 'image/jpeg';
+        const mimeType = file.type === 'image/png' ? 'image/png' : 'image/jpeg';
         
         canvas.toBlob((blob) => {
           if (blob) {
@@ -728,7 +745,7 @@ export default function App() {
               });
               
               let mimeType = img.file.type || "image/jpeg";
-              const isTransparent = img.file.type === 'image/png' || img.file.type === 'image/svg+xml';
+              const isTransparent = img.file.type === 'image/png';
               
               const promptText = buildMicrostockPrompt({
                 isTransparent,
@@ -911,7 +928,7 @@ export default function App() {
               });
               
               let mimeType = img.file.type || "image/jpeg";
-              const isTransparent = img.file.type === 'image/png' || img.file.type === 'image/svg+xml';
+              const isTransparent = img.file.type === 'image/png';
               
               const promptText = buildMicrostockPrompt({
                 isTransparent,
@@ -1172,7 +1189,7 @@ export default function App() {
             });
 
             let mimeType = currentImg!.file.type || "image/jpeg";
-            const isTransparent = currentImg!.file.type === 'image/png' || currentImg!.file.type === 'image/svg+xml';
+            const isTransparent = currentImg!.file.type === 'image/png';
             const promptText = buildMicrostockPrompt({ isTransparent, titleLength, keywordCount, styleHint, titlePreset, excludedTitleWords });
 
             const response = await ai.models.generateContent({
@@ -1263,7 +1280,7 @@ export default function App() {
             });
 
             let mimeType = currentImg!.file.type || "image/jpeg";
-            const isTransparent = currentImg!.file.type === 'image/png' || currentImg!.file.type === 'image/svg+xml';
+            const isTransparent = currentImg!.file.type === 'image/png';
             const promptText = buildMicrostockPrompt({ isTransparent, titleLength, keywordCount, styleHint, titlePreset, excludedTitleWords });
 
             const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -1468,7 +1485,7 @@ export default function App() {
             });
             
             let mimeType = img.file.type || "image/jpeg";
-            const isTransparent = img.file.type === 'image/png' || img.file.type === 'image/svg+xml';
+            const isTransparent = img.file.type === 'image/png';
             
             const promptText = buildMicrostockPrompt({
               isTransparent,
@@ -1610,7 +1627,7 @@ export default function App() {
             });
             
             let mimeType = img.file.type || "image/jpeg";
-            const isTransparent = img.file.type === 'image/png' || img.file.type === 'image/svg+xml';
+            const isTransparent = img.file.type === 'image/png';
             
             const promptText = buildMicrostockPrompt({
               isTransparent,
